@@ -1,0 +1,16 @@
+---
+- name: Deploy K3s server on GTR
+  hosts: gtr_core
+  become: true
+
+  roles:
+    - role: k3s-prereq
+    - role: k3s-server
+
+- name: Deploy K3s agents on edge nodes
+  hosts: edge_aliyun:edge_tencent
+  become: true
+
+  roles:
+    - role: k3s-prereq
+    - role: k3s-agent

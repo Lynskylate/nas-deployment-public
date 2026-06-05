@@ -1,0 +1,7 @@
+---
+k3s_install_script_url: "https://get.k3s.io"
+k3s_install_script_path: "/usr/local/src/get-k3s.sh"
+k3s_agent_service_name: "k3s-agent"
+k3s_agent_config_dir: "/etc/rancher/k3s"
+k3s_agent_config_path: "/etc/rancher/k3s/config.yaml"
+k3s_agent_service_path: "/etc/systemd/system/k3s-agent.service"

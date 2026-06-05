@@ -1,0 +1,51 @@
+---
+- name: Ensure envoy user exists before certificate copy
+  ansible.builtin.user:
+    name: envoy
+    system: true
+    shell: /usr/sbin/nologin
+    home: /var/lib/envoy
+    create_home: true
+
+- name: Ensure remote cert directory exists
+  ansible.builtin.file:
+    path: "{{ envoy_tls_cert_dir }}"
+    state: directory
+    owner: envoy
+    group: envoy
+    mode: "0750"
+
+- name: Check root CA cert exists on control node
+  ansible.builtin.stat:
+    path: "{{ edge_ca_root_cert }}"
+  register: ca_cert_stat
+  delegate_to: localhost
+  become: false
+
+- name: Check root CA key exists on control node
+  ansible.builtin.stat:
+    path: "{{ edge_ca_root_key }}"
+  register: ca_key_stat
+  delegate_to: localhost
+  become: false
+
+- name: Assert root CA files exist
+  ansible.builtin.assert:
+    that:
+      - ca_cert_stat.stat.exists
+      - ca_key_stat.stat.exists
+    fail_msg: "Root CA cert/key missing. Run edge/scripts/bootstrap-root-ca.sh and set edge_ca_root_* vars."
+
+- name: Ensure local issued cert directory exists
+  ansible.builtin.file:
+    path: "{{ edge_ca_local_issued_dir }}/{{ inventory_hostname }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  become: false
+
+- name: Issue and deploy certificates
+  ansible.builtin.include_tasks: issue-cert.yml
+  loop: "{{ envoy_tls_certificates }}"
+  loop_control:
+    loop_var: tls_cert

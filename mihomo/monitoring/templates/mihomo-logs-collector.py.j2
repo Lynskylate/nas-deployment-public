@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+"""
+Mihomo WebSocket Logs Collector
+Connects to Mihomo /logs WebSocket endpoint and forwards logs to VictoriaLogs
+"""
+
+import json
+import os
+import re
+import signal
+import sys
+import time
+import urllib.request
+import websocket
+
+MIHOMO_API = os.environ.get("MIHOMO_API", "http://127.0.0.1:9090")
+MIHOMO_SECRET = os.environ["MIHOMO_SECRET"]
+VICTORIALOGS_URL = os.environ.get("VICTORIALOGS_URL", "http://127.0.0.1:8429")
+SERVER_LABEL = os.environ.get("SERVER_LABEL", "{{ server_label }}")
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "info")
+
+WS_URL = MIHOMO_API.replace("http://", "ws://").replace("https://", "wss://")
+WS_ENDPOINT = f"{WS_URL}/logs?token={MIHOMO_SECRET}&level={LOG_LEVEL}"
+
+running = True
+
+# Pattern 1: [TCP] 192.168.31.89:58607 --> grafana.local:80 match DomainSuffix(local) using DIRECT
+# Pattern 2: 127.0.0.1:56742 --> connect.rom.miui.com:80 match GeoIP(cn) using DIRECT
+# Pattern 3: [TCP] 127.0.0.1:41778 --> httpbin.org:80 match Match using Auto[🇯🇵 日本A07 | IEPL]
+# Pattern 4: [TCP] dial DIRECT (match GeoIP/cn) 127.0.0.1:50704 --> www.reddit.com:443 error: connect failed: ...
+CONN_PATTERN = re.compile(
+    r"^(?:\[(TCP|UDP)\]\s+)?([0-9.]+):(\d+)\s+-->\s+([^:]+):(\d+)\s+match\s+(\w+)\(([^)]+)\)\s+using\s+(.+)$"
+)
+CONN_ERROR_PATTERN = re.compile(
+    r"^\[(TCP|UDP)\]\s+dial\s+(\S+)\s+\(match\s+([^)]+)\)\s+([0-9.]+):(\d+)\s+-->\s+([^:]+):(\d+)\s+error:\s+(.+)$"
+)
+
+def signal_handler(signum, frame):
+    global running
+    running = False
+    sys.exit(0)
+
+def parse_payload(payload):
+    # Pattern 1-3: Normal connection logs
+    match = CONN_PATTERN.match(payload)
+    if match:
+        return {
+            "protocol": match.group(1),
+            "client_ip": match.group(2),
+            "client_port": match.group(3),
+            "dest_host": match.group(4),
+            "dest_port": match.group(5),
+            "rule_type": match.group(6),
+            "rule_pattern": match.group(7),
+            "proxy": match.group(8),
+            "error": "",
+        }
+    
+    # Pattern 4: Error logs with dial format
+    # [TCP] dial DIRECT (match GeoIP/cn) 127.0.0.1:50704 --> www.reddit.com:443 error: ...
+    match = CONN_ERROR_PATTERN.match(payload)
+    if match:
+        # Parse rule field like "GeoIP/cn" into type and pattern
+        rule_field = match.group(3)
+        if "/" in rule_field:
+            rule_type, rule_pattern = rule_field.split("/", 1)
+        else:
+            rule_type = rule_field
+            rule_pattern = ""
+        return {
+            "protocol": match.group(1),
+            "client_ip": match.group(4),
+            "client_port": match.group(5),
+            "dest_host": match.group(6),
+            "dest_port": match.group(7),
+            "rule_type": rule_type,
+            "rule_pattern": rule_pattern,
+            "proxy": match.group(2),
+            "error": match.group(8),
+        }
+    
+    return {}
+
+def send_to_victorialogs(msg):
+    try:
+        log_type = msg.get("type", "info")
+        payload = msg.get("payload", "")
+        
+        parsed = parse_payload(payload)
+        
+        stream = {
+            "service": "mihomo",
+            "server": SERVER_LABEL,
+            "log_level": log_type,
+        }
+        
+        if parsed:
+            if parsed.get("error"):
+                stream["log_type"] = "connection_error"
+                stream["error"] = parsed.get("error", "")
+            else:
+                stream["log_type"] = "connection"
+            stream["protocol"] = parsed.get("protocol", "")
+            stream["client_ip"] = parsed.get("client_ip", "")
+            stream["dest_host"] = parsed.get("dest_host", "")
+            stream["dest_port"] = parsed.get("dest_port", "")
+            stream["rule_type"] = parsed.get("rule_type", "")
+            stream["rule_pattern"] = parsed.get("rule_pattern", "")
+            stream["proxy"] = parsed.get("proxy", "")
+        else:
+            stream["log_type"] = "general"
+        
+        data = {
+            "_msg": payload,
+            "_stream": stream,
+            "_time": msg.get("time", time.strftime("%Y-%m-%dT%H:%M:%S.000Z")),
+        }
+        
+        body = json.dumps(data).encode("utf-8")
+        req = urllib.request.Request(
+            f"{VICTORIALOGS_URL}/insert/jsonline?_stream_fields=service,server,log_level,log_type",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return resp.status in (200, 204)
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return False
+
+def on_message(ws, message):
+    try:
+        msg = json.loads(message)
+        payload = msg.get("payload", "")
+        # Debug: print received message
+        print(f"Debug: Received payload: {payload[:100]}", file=sys.stderr)
+        result = send_to_victorialogs(msg)
+        print(f"Debug: Send result: {result}", file=sys.stderr)
+    except json.JSONDecodeError:
+        pass
+
+def on_error(ws, error):
+    print(f"WebSocket error: {error}", file=sys.stderr)
+
+def on_close(ws, code, msg):
+    print(f"WebSocket closed: {code} - {msg}", file=sys.stderr)
+
+def on_open(ws):
+    print(f"Connected to Mihomo logs: {WS_ENDPOINT}", file=sys.stderr)
+
+def main():
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    headers = {
+        "Origin": MIHOMO_API,
+    }
+    
+    while running:
+        try:
+            ws = websocket.WebSocketApp(
+                WS_ENDPOINT,
+                header=headers,
+                on_open=on_open,
+                on_message=on_message,
+                on_error=on_error,
+                on_close=on_close,
+            )
+            ws.run_forever(ping_interval=30, ping_timeout=10)
+        except Exception as e:
+            print(f"Connection error: {e}", file=sys.stderr)
+        
+        if running:
+            print("Reconnecting in 5s...", file=sys.stderr)
+            time.sleep(5)
+
+if __name__ == "__main__":
+    main()

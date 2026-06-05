@@ -1,0 +1,4 @@
+# Managed by Ansible: K3s prerequisite sysctls
+{% for key, value in k3s_prereq_sysctls.items() %}
+{{ key }} = {{ value }}
+{% endfor %}

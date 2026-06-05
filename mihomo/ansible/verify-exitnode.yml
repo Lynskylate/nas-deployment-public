@@ -1,0 +1,121 @@
+---
+# Verify Tailscale Exit Node Fix Deployment
+# Usage: ansible-playbook -i inventory.ini verify-exitnode.yml
+
+- name: Verify Tailscale Exit Node Fix
+  hosts: client_server
+  become: true
+
+  tasks:
+    - name: Check tailscale-exitnode-fix service status
+      ansible.builtin.systemd:
+        name: tailscale-exitnode-fix
+      register: fix_service_status
+
+    - name: Display service status
+      ansible.builtin.debug:
+        msg: "tailscale-exitnode-fix: {{ fix_service_status.status.ActiveState }}"
+
+    - name: Check tailscaled service status
+      ansible.builtin.systemd:
+        name: tailscaled
+      register: tailscaled_status
+
+    - name: Check mihomo service status
+      ansible.builtin.systemd:
+        name: mihomo
+      register: mihomo_check_status
+
+    - name: Verify MASQUERADE rule exists
+      ansible.builtin.shell: |
+        {{ nft_binary }} list chain ip nat POSTROUTING 2>/dev/null | grep masquerade
+      register: masq_rule
+      changed_when: false
+      failed_when: masq_rule.rc != 0
+
+    - name: Verify policy routing rule exists
+      ansible.builtin.shell: |
+        {{ ip_binary }} rule show | grep "{{ tailscale_cidr }}.*lookup.*{{ mihomo_route_table }}"
+      register: policy_rule
+      changed_when: false
+      failed_when: policy_rule.rc != 0
+
+    - name: Verify fake-IP policy routing rule exists
+      ansible.builtin.shell: |
+        {{ ip_binary }} rule show | grep "to {{ mihomo_fake_ip_cidr }}.*lookup.*{{ mihomo_route_table }}"
+      register: fake_ip_rule
+      changed_when: false
+      failed_when: fake_ip_rule.rc != 0
+
+    - name: Display rule verification
+      ansible.builtin.debug:
+        msg:
+          - "MASQUERADE: {{ masq_rule.stdout | trim }}"
+          - "Policy route: {{ policy_rule.stdout | trim }}"
+          - "Fake-IP route: {{ fake_ip_rule.stdout | trim }}"
+
+    - name: Check IP forwarding
+      ansible.builtin.shell: sysctl -n net.ipv4.ip_forward
+      register: ip_forward
+      changed_when: false
+
+    - name: Assert IP forwarding is enabled
+      ansible.builtin.assert:
+        that:
+          - ip_forward.stdout == "1"
+        fail_msg: "IP forwarding is not enabled!"
+
+    - name: Test gtr internet connectivity (direct)
+      ansible.builtin.shell: |
+        timeout 30 curl -sS -o /dev/null -w "%{http_code}" https://github.com
+      register: direct_test
+      changed_when: false
+
+    - name: Test gtr internet connectivity through Mihomo fake-IP DNS
+      ansible.builtin.shell: |
+        timeout 30 curl -sS -o /dev/null -w "registry=%{http_code}\n" https://registry.npmmirror.com/
+        timeout 30 curl -sS -o /dev/null -w "baidu=%{http_code}\n" https://baidu.com/
+      register: fake_ip_connectivity
+      changed_when: false
+
+    - name: Check Mihomo TUN interface
+      ansible.builtin.shell: |
+        ip addr show Meta 2>/dev/null | head -3 || echo "Meta TUN not found"
+      register: tun_check
+      changed_when: false
+
+    - name: Check tailscale-exitnode-fix is enabled
+      ansible.builtin.shell: |
+        systemctl is-enabled tailscale-exitnode-fix
+      register: enabled_check
+      changed_when: false
+
+    - name: Check health check timer is active
+      ansible.builtin.systemd:
+        name: tailscale-exitnode-check.timer
+      register: timer_check
+      failed_when: false
+
+    - name: Check textfile collector .prom file exists
+      ansible.builtin.shell: |
+        cat /var/lib/node_exporter/textfile-collector/tailscale_exitnode.prom
+      register: prom_check
+      changed_when: false
+      failed_when: false
+
+    - name: Display verification summary
+      ansible.builtin.debug:
+        msg:
+          - "=== Verification Summary ==="
+          - "tailscale-exitnode-fix: {{ fix_service_status.status.ActiveState }} ({{ enabled_check.stdout }})"
+          - "tailscaled: {{ tailscaled_status.status.ActiveState }}"
+          - "mihomo: {{ mihomo_check_status.status.ActiveState }}"
+          - "MASQUERADE: present"
+          - "Policy route: present"
+          - "IP forwarding: enabled"
+          - "gtr direct internet: HTTP {{ direct_test.stdout }}"
+          - "Fake-IP route: present"
+          - "Fake-IP connectivity: {{ fake_ip_connectivity.stdout_lines }}"
+          - "Meta TUN: {{ tun_check.stdout_lines[0] | default('not found') }}"
+          - "Health check timer: {{ timer_check.status.ActiveState | default('inactive') }}"
+          - "Textfile .prom: {{ 'present' if prom_check.rc == 0 else 'missing' }}"

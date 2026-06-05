@@ -1,0 +1,11 @@
+---
+# Handlers for Shadowsocks Server
+
+- name: reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: restart shadowsocks-server
+  ansible.builtin.systemd:
+    name: shadowsocks-server
+    state: restarted

@@ -1,0 +1,79 @@
+---
+# Shadow-TLS Server Role
+
+- name: Create shadowtls user
+  ansible.builtin.user:
+    name: shadowtls
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+    state: present
+
+- name: Check if shadow-tls binary exists
+  ansible.builtin.stat:
+    path: "{{ stls_server_bin_path }}/shadow-tls"
+  register: stls_binary
+
+- name: Create installation directory
+  ansible.builtin.file:
+    path: "{{ stls_server_bin_path }}"
+    state: directory
+    mode: '0755'
+  when: not stls_binary.stat.exists
+
+- name: Download shadow-tls binary
+  ansible.builtin.get_url:
+    url: "{{ shadowtls_download_url }}/{{ shadowtls_version }}/shadow-tls-x86_64-unknown-linux-musl"
+    dest: "{{ stls_server_bin_path }}/shadow-tls"
+    mode: '0755'
+    timeout: 300
+  environment: "{{ {'http_proxy': github_download_proxy, 'https_proxy': github_download_proxy} if (github_download_proxy | default('') | length > 0) else {} }}"
+  register: download_result
+  until: download_result is succeeded
+  retries: 5
+  delay: 10
+  when: not stls_binary.stat.exists
+  notify: restart shadow-tls-server
+
+- name: Deploy systemd service file
+  ansible.builtin.template:
+    src: shadow-tls-server.service.j2
+    dest: /etc/systemd/system/shadow-tls-server.service
+    mode: '0644'
+  notify:
+    - reload systemd
+    - restart shadow-tls-server
+
+- name: Pin Shadow-TLS upstream SNI host in /etc/hosts (optional)
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^[0-9a-fA-F:\\.]+\\s+{{ shadowtls_sni_server | regex_escape() }}(\\s|$)'
+    line: "{{ shadowtls_sni_host_ip | default('') }} {{ shadowtls_sni_server }}"
+    state: present
+    create: true
+  when: (shadowtls_sni_host_ip | default('')) | length > 0
+  notify: restart shadow-tls-server
+
+- name: Configure firewall (UFW)
+  ansible.builtin.ufw:
+    rule: allow
+    port: "{{ shadowtls_tls_port }}"
+    proto: "{{ item }}"
+  loop:
+    - tcp
+    - udp
+  when: ansible_facts['pkg_mgr'] == 'apt'
+  ignore_errors: true
+
+- name: Enable and start shadow-tls-server
+  ansible.builtin.systemd:
+    name: shadow-tls-server
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Cleanup temp files
+  ansible.builtin.file:
+    path: /tmp/shadow-tls-x86_64-unknown-linux-musl
+    state: absent
+  ignore_errors: true

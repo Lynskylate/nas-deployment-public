@@ -1,0 +1,74 @@
+---
+gtr_ai_user: lynskylate
+gtr_ai_home: "/home/{{ gtr_ai_user }}"
+gtr_ai_controller_home: "{{ lookup('env', 'HOME') }}"
+
+gtr_ai_npm_global_packages:
+  - name: "@anthropic-ai/claude-code"
+    version: "2.1.158"
+    bin: claude
+  - name: "@openai/codex"
+    version: "0.135.0"
+    bin: codex
+  - name: "opencode-ai"
+    version: "1.15.13"
+    bin: opencode
+
+gtr_ai_config_dirs:
+  - path: "{{ gtr_ai_home }}/.claude"
+    mode: "0700"
+  - path: "{{ gtr_ai_home }}/.codex"
+    mode: "0700"
+  - path: "{{ gtr_ai_home }}/.config"
+    mode: "0755"
+  - path: "{{ gtr_ai_home }}/.config/systemd"
+    mode: "0755"
+  - path: "{{ gtr_ai_home }}/.config/systemd/user"
+    mode: "0755"
+  - path: "{{ gtr_ai_home }}/.config/opencode"
+    mode: "0755"
+  - path: "{{ gtr_ai_home }}/.opencode"
+    mode: "0755"
+
+gtr_ai_config_files:
+  - src: "{{ gtr_ai_controller_home }}/.claude/settings.json"
+    dest: "{{ gtr_ai_home }}/.claude/settings.json"
+    mode: "0600"
+    secret: true
+  - src: "{{ gtr_ai_controller_home }}/.claude/settings.local.json"
+    dest: "{{ gtr_ai_home }}/.claude/settings.local.json"
+    mode: "0600"
+  - src: "{{ gtr_ai_controller_home }}/.claude/.credentials.json"
+    dest: "{{ gtr_ai_home }}/.claude/.credentials.json"
+    mode: "0600"
+    secret: true
+  - src: "{{ gtr_ai_controller_home }}/.codex/config.toml"
+    dest: "{{ gtr_ai_home }}/.codex/config.toml"
+    mode: "0600"
+  - src: "{{ gtr_ai_controller_home }}/.codex/auth.json"
+    dest: "{{ gtr_ai_home }}/.codex/auth.json"
+    mode: "0600"
+    secret: true
+  - src: "{{ gtr_ai_controller_home }}/.config/opencode/opencode.jsonc"
+    dest: "{{ gtr_ai_home }}/.config/opencode/opencode.jsonc"
+    mode: "0644"
+  - src: "{{ gtr_ai_controller_home }}/.config/opencode/package.json"
+    dest: "{{ gtr_ai_home }}/.config/opencode/package.json"
+    mode: "0644"
+  - src: "{{ gtr_ai_controller_home }}/.config/opencode/package-lock.json"
+    dest: "{{ gtr_ai_home }}/.config/opencode/package-lock.json"
+    mode: "0644"
+  - src: "{{ gtr_ai_controller_home }}/.opencode/package.json"
+    dest: "{{ gtr_ai_home }}/.opencode/package.json"
+    mode: "0644"
+  - src: "{{ gtr_ai_controller_home }}/.opencode/package-lock.json"
+    dest: "{{ gtr_ai_home }}/.opencode/package-lock.json"
+    mode: "0644"
+
+slock_ai_label: tiequn-misc
+slock_ai_service_name: slock-ai-daemon.service
+slock_ai_server_url: "https://api.slock.ai"
+slock_ai_npx_package: "@slock-ai/daemon@0.55.5"
+slock_ai_npx_bin: slock-daemon
+slock_ai_config_dir: "{{ gtr_ai_home }}/.config/slock-ai"
+slock_ai_env_file: "{{ slock_ai_config_dir }}/daemon.env"

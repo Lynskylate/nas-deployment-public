@@ -1,0 +1,45 @@
+{
+  "business_summary": "物业管理与增值服务，核心收入来自住宅与商业物业管理费。",
+  "latest_announcements": [
+    "公司公告维持稳定派息政策",
+    "无重大并购事件"
+  ],
+  "known_risks": [
+    "房地产相关客户回款波动",
+    "人工成本上升"
+  ],
+  "ultimate_controller": "北京市某国资平台",
+  "controller_level": "市级国企",
+  "controller_ratio": 0.47,
+  "largest_shareholder_ratio": 0.58,
+
+  "continuous_dividend_years": 7,
+  "holding_value_coverage": 0.36,
+  "parent_discount_rate": 0.33,
+  "parent_holding_ratio": 0.62,
+  "net_cash_positive": true,
+  "catalyst_probability": 0.42,
+  "dividend_history": [0.28, 0.30, 0.31, 0.27],
+
+  "pledged_assets_ratio": 0.05,
+  "goodwill_impairment_major": false,
+  "ar_90d_ratio": 0.16,
+  "related_party_ar_ratio": 0.08,
+  "dio_three_year_up": false,
+  "dio_vs_industry_gap": 0.18,
+  "off_balance_liabilities_to_mcap": 0.04,
+  "cap_commit_to_net_cash": 0.12,
+  "related_guarantee_major": false,
+  "pension_gap_to_mcap": 0.02,
+  "major_litigation_unresolved": false,
+  "other_payables_ratio": 0.18,
+  "other_payables_unexplained": false,
+  "related_trade_revenue_ratio": 0.09,
+  "related_trade_mispricing": false,
+  "top5_customer_ratio": 0.34,
+  "q4_revenue_ratio": 0.29,
+  "non_standard_audit": false,
+  "management_integrity_issue": false,
+  "subsidy_profit_ratio": 0.11,
+  "subsidy_high_three_year": false
+}

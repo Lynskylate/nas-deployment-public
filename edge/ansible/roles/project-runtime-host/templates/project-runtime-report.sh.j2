@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "== podman version =="
+podman --version
+echo
+
+echo "== shared roots =="
+for path in /srv/projects /srv/project-secrets /srv/project-state; do
+  stat -c '%A %U:%G %n' "$path"
+done
+echo
+
+echo "== loginctl linger users =="
+loginctl list-users --no-legend || true
+

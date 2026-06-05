@@ -1,0 +1,68 @@
+---
+- name: Deploy unified edge baseline to remote_proxy and aliyun
+  hosts: edge_hosts
+  become: true
+
+  pre_tasks:
+    - name: Switch apt to Aliyun mirror (China acceleration)
+      ansible.builtin.shell: |
+        set -e
+        if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+          sed -i 's|http://archive.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
+          sed -i 's|http://security.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
+        elif [ -f /etc/apt/sources.list ]; then
+          sed -i 's|http://archive.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g' /etc/apt/sources.list
+          sed -i 's|http://security.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g' /etc/apt/sources.list
+        fi
+        apt-get update -qq
+        mkdir -p /var/lib/gtr-edge
+        touch /var/lib/gtr-edge/apt-mirror-switched
+      args:
+        creates: /var/lib/gtr-edge/apt-mirror-switched
+      when: github_download_proxy | default('') | length > 0
+
+    - name: Run legacy proxy cleanup on aliyun only
+      ansible.builtin.include_role:
+        name: cleanup-aliyun-legacy-proxy
+      when: cleanup_legacy_proxy | bool
+
+    - name: Cleanup tunnel server components on non-tunnel edge nodes
+      ansible.builtin.include_role:
+        name: cleanup-edge-tunnel-server
+      when: not (edge_tunnel_server_enabled | bool)
+
+  roles:
+    - role: node-exporter
+    - role: edge-tailscale
+    - role: edge-vector
+      when: edge_vector_enabled | bool
+    - role: edge-ca-issuer
+      when: edge_ca_issue_enabled | bool
+    - role: edge-ca-trust
+      when: edge_ca_trust_enabled | bool
+    - role: edge-envoy
+
+  post_tasks:
+    - name: Ensure edge services are running
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: started
+      loop:
+        - node_exporter
+        - tailscaled
+        - envoy
+
+    - name: Ensure vector service is running when enabled
+      ansible.builtin.systemd:
+        name: vector
+        state: started
+      when: edge_vector_enabled | bool
+
+    - name: Display edge deployment summary
+      ansible.builtin.debug:
+        msg:
+          - "Edge host: {{ inventory_hostname }}"
+          - "Public edge entry (TLS): 0.0.0.0:{{ envoy_listener_port }}"
+          - "Public edge entry (HTTP): 0.0.0.0:{{ envoy_http_listener_port if (envoy_http_listener_enabled | bool) else 'disabled' }}"
+          - "Tunnel server enabled: {{ edge_tunnel_server_enabled | bool }}"
+          - "Legacy cleanup applied: {{ cleanup_legacy_proxy | bool }}"

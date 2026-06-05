@@ -1,0 +1,49 @@
+---
+# Mihomo Configuration for Aliyun
+
+# Version configuration
+mihomo_version: "v1.19.20"
+mihomo_download_url: "https://github.com/MetaCubeX/mihomo/releases/download"
+mihomo_arch: "linux-amd64"
+
+# Installation paths
+mihomo_bin_path: "/usr/local/bin"
+mihomo_config_path: "/etc/mihomo"
+mihomo_home_path: "/var/lib/mihomo"
+mihomo_log_path: "/var/log/mihomo"
+
+# Mihomo service configuration
+mihomo_user: "mihomo"
+mihomo_group: "mihomo"
+mihomo_mixed_port: 7890
+mihomo_allow_lan: false
+mihomo_log_level: "info"
+mihomo_mode: "rule"
+
+# External controller (API)
+mihomo_external_controller: "127.0.0.1:9090"
+
+# Envoy proxy authentication
+proxy_auth_username: "mihomo"
+
+# ShadowTLS proxy configuration
+shadowtls_server: "66.154.100.187"
+shadowtls_port: 443
+shadowtls_sni: "www.microsoft.com"
+shadowsocks_method: "aes-256-gcm"
+
+# Envoy configuration
+envoy_config_path: "/etc/envoy"
+envoy_config_file: "/etc/envoy/envoy.yaml"
+envoy_backup_dir: "/etc/envoy/backup"
+
+# VictoriaLogs OTLP endpoint (via Tailscale)
+victorialogs_host: "gtr.tail414c32.ts.net"
+victorialogs_port: 8429
+
+# VictoriaTrace OTLP gRPC endpoint (via Tailscale)
+victoriatrace_host: "gtr.tail414c32.ts.net"
+victoriatrace_port: 9429
+
+# Vector version
+vector_version: "v0.53.0"

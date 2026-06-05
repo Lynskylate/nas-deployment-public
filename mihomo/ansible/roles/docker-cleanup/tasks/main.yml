@@ -1,0 +1,111 @@
+---
+# Docker Cleanup: Remove snap Docker, consolidate to system Docker,
+# disable Docker's nftables management to eliminate conflicts with
+# Tailscale/Mihomo routing rules.
+
+# --- Phase 1: Disable snap Docker ---
+
+- name: Check if snap docker is installed
+  ansible.builtin.command: snap list docker
+  register: snap_docker_check
+  changed_when: false
+  failed_when: false
+
+- name: Stop snap docker service
+  ansible.builtin.command: snap stop docker
+  when: snap_docker_check.rc == 0
+  changed_when: true
+  failed_when: false
+
+- name: Disable snap docker
+  ansible.builtin.command: snap disable docker
+  when: snap_docker_check.rc == 0
+  changed_when: true
+  failed_when: false
+
+- name: Remove stopped containers from snap docker (if any)
+  ansible.builtin.shell: |
+    docker ps -aq | xargs -r docker rm -f 2>/dev/null || true
+  when: snap_docker_check.rc == 0
+  changed_when: false
+
+- name: Uninstall snap docker
+  ansible.builtin.command: snap remove docker
+  when:
+    - snap_docker_check.rc == 0
+    - docker_remove_snap | default(false) | bool
+  changed_when: true
+
+# --- Phase 2: Configure system Docker ---
+
+- name: Ensure system docker service exists
+  ansible.builtin.systemd:
+    name: docker
+  register: docker_service_check
+  failed_when: false
+
+- name: Fail if system docker is not available
+  ansible.builtin.fail:
+    msg: "System docker.service not found. Install docker-ce via apt."
+  when: docker_service_check.status is not defined
+
+- name: Deploy Docker daemon.json (iptables=false + registry mirrors)
+  ansible.builtin.template:
+    src: daemon.json.j2
+    dest: /etc/docker/daemon.json
+    mode: '0644'
+    owner: root
+    group: root
+  notify: restart docker
+
+- name: Apply Docker config changes
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure system docker is enabled and running
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Verify docker socket is accessible
+  ansible.builtin.wait_for:
+    path: /run/docker.sock
+    state: present
+    timeout: 30
+
+# --- Phase 3: Manage Docker bridge NAT rules manually ---
+# With iptables=false, Docker no longer manages nftables.
+# Bridge MASQUERADE rules must be maintained for container internet access.
+
+- name: Ensure Docker bridge MASQUERADE rules exist
+  ansible.builtin.shell: |
+    {{ nft_binary }} list chain ip nat POSTROUTING 2>/dev/null | grep -q 'saddr {{ item.subnet }}.*masquerade' || \
+    {{ nft_binary }} insert rule ip nat POSTROUTING ip saddr {{ item.subnet }} oifname != "{{ item.bridge }}" masquerade
+  loop: "{{ docker_bridges }}"
+  register: bridge_masq_result
+  changed_when: "'insert' in bridge_masq_result.stderr or bridge_masq_result.rc != 0"
+  failed_when: false
+
+- name: Verify Docker bridge MASQUERADE rules
+  ansible.builtin.shell: |
+    {{ nft_binary }} list chain ip nat POSTROUTING 2>/dev/null | grep -q 'saddr {{ item.subnet }}.*masquerade'
+  loop: "{{ docker_bridges }}"
+  changed_when: false
+  failed_when: false
+
+# --- Phase 4: Verify ---
+
+- name: Display Docker status
+  ansible.builtin.shell: |
+    docker info 2>/dev/null | grep -E "Server Version|Docker Root Dir" | head -2
+  register: docker_info
+  changed_when: false
+
+- name: Display deployment result
+  ansible.builtin.debug:
+    msg:
+      - "System Docker: {{ docker_info.stdout_lines }}"
+      - "iptables: false (Docker no longer manages nftables)"
+      - "Bridge NAT: managed by Ansible + exitnode-monitor"
+      - "Snap Docker: disabled"

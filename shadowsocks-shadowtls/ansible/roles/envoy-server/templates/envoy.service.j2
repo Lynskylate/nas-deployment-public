@@ -1,0 +1,29 @@
+[Unit]
+Description=Envoy Proxy
+Documentation=https://www.envoyproxy.io/docs/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=envoy
+Group=envoy
+ExecStart={{ envoy_bin_path }}/envoy \
+    -c /etc/envoy/envoy.yaml \
+    --log-level info
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+LimitNOFILE=65536
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/envoy /var/lib/envoy /etc/envoy/dynamic_config
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

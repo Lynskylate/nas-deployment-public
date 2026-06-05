@@ -1,0 +1,196 @@
+# config file version
+apiVersion: 1
+
+# List of rule groups to import or update
+groups:
+  - orgId: 1
+    name: system_alerts
+    folder: 系统监控
+    interval: 30s
+    rules:
+      # 服务离线告警
+      - uid: service_down_alert
+        title: 服务离线告警
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: ced27ic71i9z4e
+            model:
+              type: query
+              datasource:
+                type: prometheus
+                uid: ced27ic71i9z4e
+              expr: up{job=~"node_exporter|victoriametrics"}
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+        noDataState: NoData
+        executionErrorState: Alerting
+        for: 1m
+        annotations:
+          description: "实例 {{ $labels.instance }} 的 {{ $labels.job }} 服务已离线"
+          summary: "服务离线告警"
+        labels:
+          severity: critical
+        isPaused: false
+
+      # CPU 使用率告警
+      - uid: cpu_high_alert
+        title: CPU 使用率过高告警
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: ced27ic71i9z4e
+            model:
+              type: query
+              datasource:
+                type: prometheus
+                uid: ced27ic71i9z4e
+              expr: '100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)'
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+        noDataState: NoData
+        executionErrorState: Alerting
+        for: 5m
+        annotations:
+          description: "实例 {{ $labels.instance }} CPU 使用率超过 80%，当前值: {{ $value }}%"
+          summary: "CPU 使用率过高"
+        labels:
+          severity: warning
+        isPaused: false
+
+      # 内存使用率告警
+      - uid: memory_high_alert
+        title: 内存使用率过高告警
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: ced27ic71i9z4e
+            model:
+              type: query
+              datasource:
+                type: prometheus
+                uid: ced27ic71i9z4e
+              expr: '(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100'
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+        noDataState: NoData
+        executionErrorState: Alerting
+        for: 5m
+        annotations:
+          description: "实例 {{ $labels.instance }} 内存使用率超过 85%，当前值: {{ $value }}%"
+          summary: "内存使用率过高"
+        labels:
+          severity: warning
+        isPaused: false
+
+      # 磁盘使用率告警
+      - uid: disk_high_alert
+        title: 磁盘使用率过高告警
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: ced27ic71i9z4e
+            model:
+              type: query
+              datasource:
+                type: prometheus
+                uid: ced27ic71i9z4e
+              expr: '(1 - (node_filesystem_avail_bytes{fstype!="tmpfs"} / node_filesystem_size_bytes{fstype!="tmpfs"})) * 100'
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+        noDataState: NoData
+        executionErrorState: Alerting
+        for: 5m
+        annotations:
+          description: "实例 {{ $labels.instance }} 挂载点 {{ $labels.mountpoint }} 磁盘使用率超过 85%，当前值: {{ $value }}%"
+          summary: "磁盘使用率过高"
+        labels:
+          severity: warning
+        isPaused: false
+
+      # 磁盘使用率严重告警
+      - uid: disk_critical_alert
+        title: 磁盘使用率严重告警
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: ced27ic71i9z4e
+            model:
+              type: query
+              datasource:
+                type: prometheus
+                uid: ced27ic71i9z4e
+              expr: '(1 - (node_filesystem_avail_bytes{fstype!="tmpfs"} / node_filesystem_size_bytes{fstype!="tmpfs"})) * 100'
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+        noDataState: NoData
+        executionErrorState: Alerting
+        for: 2m
+        annotations:
+          description: "实例 {{ $labels.instance }} 挂载点 {{ $labels.mountpoint }} 磁盘使用率超过 95%，当前值: {{ $value }}%"
+          summary: "磁盘空间严重不足"
+        labels:
+          severity: critical
+        isPaused: false
+
+  - orgId: 1
+    name: envoy_alerts
+    folder: Envoy监控
+    interval: 30s
+    rules:
+      # Envoy 上游错误率告警
+      - uid: envoy_upstream_error_alert
+        title: Envoy 上游错误率过高告警
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: ced27ic71i9z4e
+            model:
+              type: query
+              datasource:
+                type: prometheus
+                uid: ced27ic71i9z4e
+              expr: '(sum(rate(envoy_cluster_upstream_rq_xx{envoy_response_code_class!~"2xx|3xx"}[5m])) / sum(rate(envoy_cluster_upstream_rq_xx[5m]))) * 100'
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+        noDataState: NoData
+        executionErrorState: Alerting
+        for: 3m
+        annotations:
+          description: "Envoy 集群 {{ $labels.envoy_cluster_name }} 错误率超过 5%，当前值: {{ $value }}%"
+          summary: "Envoy 上游错误率过高"
+        labels:
+          severity: warning
+        isPaused: false
+
+      # Envoy 熔断器触发告警
+      - uid: envoy_circuit_breaker_alert
+        title: Envoy 熔断器触发告警
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: ced27ic71i9z4e
+            model:
+              type: query
+              datasource:
+                type: prometheus
+                uid: ced27ic71i9z4e
+              expr: 'sum(envoy_cluster_circuit_breakers_default_rq_open) + sum(envoy_cluster_circuit_breakers_default_cx_open)'
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+        noDataState: NoData
+        executionErrorState: Alerting
+        for: 1m
+        annotations:
+          description: "Envoy 集群 {{ $labels.envoy_cluster_name }} 熔断器已被触发"
+          summary: "Envoy 熔断器触发"
+        labels:
+          severity: critical
+        isPaused: false

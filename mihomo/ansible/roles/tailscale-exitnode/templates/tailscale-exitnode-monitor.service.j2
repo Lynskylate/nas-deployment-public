@@ -1,0 +1,8 @@
+[Unit]
+Description=Tailscale exit node routing rule health check + auto-fix
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart={{ tailscale_exitnode_script_dir }}/tailscale-exitnode-monitor.sh
+User=root

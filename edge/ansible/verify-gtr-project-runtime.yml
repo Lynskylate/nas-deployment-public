@@ -1,0 +1,37 @@
+---
+- name: Verify project runtime host baseline on GTR
+  hosts: gtr_core
+  become: true
+
+  tasks:
+    - name: Verify podman CLI exists
+      ansible.builtin.command: podman --version
+      register: project_runtime_podman_version
+      changed_when: false
+
+    - name: Verify shared roots exist
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /srv/projects
+        - /srv/project-secrets
+        - /srv/project-state
+        - /usr/local/bin/project-runtime-report
+      register: project_runtime_stats
+
+    - name: Assert runtime assets exist
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+        fail_msg: "Missing runtime asset: {{ item.item }}"
+        quiet: true
+      loop: "{{ project_runtime_stats.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Display runtime summary
+      ansible.builtin.debug:
+        msg:
+          - "Podman: {{ project_runtime_podman_version.stdout }}"
+          - "Shared roots verified: /srv/projects, /srv/project-secrets, /srv/project-state"
+

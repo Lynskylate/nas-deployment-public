@@ -1,0 +1,29 @@
+---
+- name: Verify CA trust on servers
+  hosts: edge_hosts:gtr_core
+  become: true
+
+  tasks:
+    - name: Skip when CA trust is disabled
+      ansible.builtin.meta: end_host
+      when: not (edge_ca_trust_enabled | bool)
+
+    - name: Check root CA trust file exists
+      ansible.builtin.stat:
+        path: "{{ edge_ca_trust_target_path }}"
+      register: trust_file
+
+    - name: Assert root CA trust file exists
+      ansible.builtin.assert:
+        that:
+          - trust_file.stat.exists
+        fail_msg: "Root CA trust file missing: {{ edge_ca_trust_target_path }}"
+
+    - name: Verify issued certs on edge hosts
+      ansible.builtin.shell: |
+        openssl verify -CAfile {{ edge_ca_trust_target_path }} {{ item.cert_path }}
+      loop: "{{ envoy_tls_certificates }}"
+      when:
+        - inventory_hostname in groups['edge_hosts']
+        - envoy_tls_certificates | length > 0
+      changed_when: false

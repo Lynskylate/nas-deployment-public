@@ -1,0 +1,16 @@
+---
+# Handlers for Tailscale Exit Node Fix
+
+- name: reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: restart tailscale-exitnode-fix
+  ansible.builtin.systemd:
+    name: tailscale-exitnode-fix
+    state: restarted
+
+- name: restart systemd-resolved
+  ansible.builtin.systemd:
+    name: systemd-resolved
+    state: restarted

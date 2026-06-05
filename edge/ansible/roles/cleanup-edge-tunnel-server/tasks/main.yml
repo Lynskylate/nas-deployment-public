@@ -1,0 +1,36 @@
+---
+- name: Gather service facts before tunnel cleanup
+  ansible.builtin.service_facts:
+
+- name: Stop, disable and mask tunnel server services
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+    masked: true
+    daemon_reload: true
+  loop:
+    - shadowsocks-server
+    - shadow-tls-server
+  when: item + ".service" in ansible_facts.services
+
+- name: Remove tunnel server files and directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/shadowsocks/config.json
+    - /etc/systemd/system/shadowsocks-server.service
+    - /etc/systemd/system/shadow-tls-server.service
+    - "{{ ss_server_bin_path }}"
+    - "{{ stls_server_bin_path }}"
+
+- name: Remove pinned Shadow-TLS SNI host from /etc/hosts
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^[0-9a-fA-F:\\.]+\\s+{{ shadowtls_sni_server | regex_escape() }}(\\s|$)'
+    state: absent
+
+- name: Reload systemd after tunnel cleanup
+  ansible.builtin.systemd:
+    daemon_reload: true

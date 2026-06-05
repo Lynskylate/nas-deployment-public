@@ -1,0 +1,17 @@
+token: "{{ k3s_cluster_token }}"
+write-kubeconfig-mode: "0640"
+cluster-cidr: "{{ k3s_cluster_cidr }}"
+service-cidr: "{{ k3s_service_cidr }}"
+cluster-dns: "{{ k3s_cluster_dns }}"
+advertise-address: "{{ k3s_server_effective_ip }}"
+node-ip: "{{ k3s_server_effective_ip }}"
+node-name: "{{ inventory_hostname }}"
+flannel-iface: "{{ k3s_flannel_iface }}"
+disable:
+{% for item in k3s_disable_components %}
+  - {{ item }}
+{% endfor %}
+tls-san:
+{% for item in k3s_server_effective_tls_sans %}
+  - "{{ item }}"
+{% endfor %}

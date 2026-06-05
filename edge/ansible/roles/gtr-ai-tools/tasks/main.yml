@@ -1,0 +1,178 @@
+---
+- name: Verify required variables
+  ansible.builtin.assert:
+    that:
+      - gtr_ai_user is defined
+      - slock_ai_server_url is defined
+      - slock_ai_api_key is defined
+      - slock_ai_api_key | length > 0
+    fail_msg: "gtr-ai-tools requires gtr_ai_user and slock_ai_api_key"
+  no_log: true
+
+- name: Gather target AI user passwd entry
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ gtr_ai_user }}"
+
+- name: Set target AI user facts
+  ansible.builtin.set_fact:
+    gtr_ai_user_uid: "{{ ansible_facts.getent_passwd[gtr_ai_user][1] }}"
+    gtr_ai_user_gid: "{{ ansible_facts.getent_passwd[gtr_ai_user][2] }}"
+
+- name: Ensure npm and npx are available
+  ansible.builtin.command: "{{ item }} --version"
+  loop:
+    - node
+    - npm
+    - npx
+  register: gtr_ai_node_tool_versions
+  changed_when: false
+
+- name: Install pinned AI coding CLIs globally
+  ansible.builtin.shell: |
+    set -euo pipefail
+    root="$(npm root -g)"
+    package_name="{{ item.name }}"
+    package_version="{{ item.version }}"
+    if node - "$root" "$package_name" "$package_version" <<'NODE'
+    const path = require("path");
+    const [root, packageName, packageVersion] = process.argv.slice(2);
+    try {
+      const pkg = require(path.join(root, packageName, "package.json"));
+      process.exit(pkg.version === packageVersion ? 0 : 1);
+    } catch {
+      process.exit(1);
+    }
+    NODE
+    then
+      echo "${package_name}@${package_version} already installed"
+    else
+      npm install -g "${package_name}@${package_version}" --registry=https://registry.npmmirror.com
+    fi
+  args:
+    executable: /bin/bash
+  loop: "{{ gtr_ai_npm_global_packages }}"
+  register: gtr_ai_npm_install
+  changed_when: "'already installed' not in gtr_ai_npm_install.stdout"
+
+- name: Verify AI coding CLI binaries
+  ansible.builtin.command: "{{ item.bin }} --version"
+  loop: "{{ gtr_ai_npm_global_packages }}"
+  register: gtr_ai_cli_versions
+  changed_when: false
+
+- name: Ensure AI config directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ gtr_ai_user }}"
+    group: "{{ gtr_ai_user }}"
+    mode: "{{ item.mode }}"
+  loop: "{{ gtr_ai_config_dirs }}"
+
+- name: Check controller config files
+  ansible.builtin.stat:
+    path: "{{ item.src }}"
+  delegate_to: localhost
+  become: false
+  loop: "{{ gtr_ai_config_files }}"
+  loop_control:
+    label: "{{ item.src }}"
+  register: gtr_ai_controller_config_stats
+
+- name: Copy WSL AI tool config files to GTR
+  ansible.builtin.copy:
+    src: "{{ item.item.src }}"
+    dest: "{{ item.item.dest }}"
+    owner: "{{ gtr_ai_user }}"
+    group: "{{ gtr_ai_user }}"
+    mode: "{{ item.item.mode }}"
+  loop: "{{ gtr_ai_controller_config_stats.results }}"
+  loop_control:
+    label: "{{ item.item.dest }}"
+  when: item.stat.exists
+  no_log: "{{ item.item.secret | default(false) }}"
+
+- name: Enable lingering for AI user systemd services
+  ansible.builtin.command: "loginctl enable-linger {{ gtr_ai_user }}"
+  changed_when: false
+
+- name: Ensure AI user systemd manager is started
+  ansible.builtin.systemd:
+    name: "user@{{ gtr_ai_user_uid }}.service"
+    state: started
+
+- name: Ensure Slock config directory exists
+  ansible.builtin.file:
+    path: "{{ slock_ai_config_dir }}"
+    state: directory
+    owner: "{{ gtr_ai_user }}"
+    group: "{{ gtr_ai_user }}"
+    mode: "0700"
+
+- name: Deploy Slock daemon environment
+  ansible.builtin.template:
+    src: slock-ai-daemon.env.j2
+    dest: "{{ slock_ai_env_file }}"
+    owner: "{{ gtr_ai_user }}"
+    group: "{{ gtr_ai_user }}"
+    mode: "0600"
+  no_log: true
+
+- name: Deploy Slock user systemd service
+  ansible.builtin.template:
+    src: slock-ai-daemon.service.j2
+    dest: "{{ gtr_ai_home }}/.config/systemd/user/{{ slock_ai_service_name }}"
+    owner: "{{ gtr_ai_user }}"
+    group: "{{ gtr_ai_user }}"
+    mode: "0644"
+
+- name: Confirm Slock daemon package resolves through npx
+  ansible.builtin.shell: |
+    cd {{ gtr_ai_home }}
+    runuser -u {{ gtr_ai_user }} -- env HOME={{ gtr_ai_home }} XDG_RUNTIME_DIR=/run/user/{{ gtr_ai_user_uid }} \
+      npx --yes {{ slock_ai_npx_package }} 2>&1 | grep -q 'Usage: slock-daemon'
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Reload AI user systemd manager
+  ansible.builtin.command: >
+    runuser -u {{ gtr_ai_user }} -- env
+    HOME={{ gtr_ai_home }}
+    XDG_RUNTIME_DIR=/run/user/{{ gtr_ai_user_uid }}
+    systemctl --user daemon-reload
+  changed_when: false
+
+- name: Enable Slock user service
+  ansible.builtin.command: >
+    runuser -u {{ gtr_ai_user }} -- env
+    HOME={{ gtr_ai_home }}
+    XDG_RUNTIME_DIR=/run/user/{{ gtr_ai_user_uid }}
+    systemctl --user enable {{ slock_ai_service_name }}
+  register: slock_ai_enable
+  changed_when: "'Created symlink' in slock_ai_enable.stdout or 'Created symlink' in slock_ai_enable.stderr"
+
+- name: Restart Slock user service
+  ansible.builtin.command: >
+    runuser -u {{ gtr_ai_user }} -- env
+    HOME={{ gtr_ai_home }}
+    XDG_RUNTIME_DIR=/run/user/{{ gtr_ai_user_uid }}
+    systemctl --user restart {{ slock_ai_service_name }}
+  changed_when: true
+
+- name: Verify Slock user service is active
+  ansible.builtin.command: >
+    runuser -u {{ gtr_ai_user }} -- env
+    HOME={{ gtr_ai_home }}
+    XDG_RUNTIME_DIR=/run/user/{{ gtr_ai_user_uid }}
+    systemctl --user is-active {{ slock_ai_service_name }}
+  register: slock_ai_active
+  changed_when: false
+
+- name: Display AI tool deployment summary
+  ansible.builtin.debug:
+    msg:
+      - "Installed CLI versions: {{ gtr_ai_cli_versions.results | map(attribute='stdout') | list }}"
+      - "Slock service: {{ slock_ai_service_name }} is {{ slock_ai_active.stdout }}"
+      - "Config source: {{ gtr_ai_controller_home }}"

@@ -1,0 +1,68 @@
+---
+# Mihomo Configuration
+
+# GitHub download proxy (GTR local mihomo proxy)
+github_download_proxy: "http://127.0.0.1:7890"
+
+# Version configuration
+mihomo_version: "v1.19.20"
+mihomo_download_url: "https://github.com/MetaCubeX/mihomo/releases/download"
+
+# Installation paths
+mihomo_bin_path: "/usr/local/bin"
+mihomo_config_path: "/etc/mihomo"
+mihomo_home_path: "/var/lib/mihomo"
+
+# Proxy provider configuration
+proxy_provider_interval: 3600
+
+# ShadowTLS proxy configuration
+shadowtls_server: "66.154.100.187"
+shadowtls_port: 443
+shadowtls_sni: "www.microsoft.com"
+shadowsocks_method: "aes-256-gcm"
+
+# Hysteria2 proxy configuration
+hysteria2_server: "66.154.100.187"
+hysteria2_port: 8443
+hysteria2_sni: "bing.com"
+hysteria2_skip_cert_verify: true
+hysteria2_up: "100 mbps"
+hysteria2_down: "100 mbps"
+
+# Hysteria2 + Salamander obfuscation
+hysteria2_sal_port: 12345
+
+# Mihomo service configuration
+mihomo_mixed_port: 7890
+mihomo_allow_lan: true
+mihomo_log_level: "info"
+mihomo_mode: "rule"
+mihomo_external_controller: "127.0.0.1:9090"
+mihomo_dns_listen: "100.121.0.67:53"
+mihomo_dns_ipv6: true
+mihomo_enhanced_mode: "redir-host"
+
+# --- Tailscale Exit Node Fix ---
+tailscale_cidr: 100.64.0.0/10
+mihomo_route_table: 2022
+tailscale_exitnode_rule_priority: 1000
+nft_binary: /usr/sbin/nft
+ip_binary: /sbin/ip
+tailscale_exitnode_monitor_interval: 30
+tailscale_exitnode_script_dir: /usr/local/bin
+tailscale_exitnode_textfile_dir: /var/lib/node_exporter/textfile-collector
+
+# --- Docker Cleanup ---
+docker_bridges:
+  - bridge: docker0
+    subnet: 172.17.0.0/16
+  - bridge: br-9257ae6e34da
+    subnet: 172.18.0.0/16
+
+docker_registry_mirrors:
+  - "https://docker.m.daocloud.io"
+  - "https://docker.1panel.live"
+  - "https://hub.rat.dev"
+
+docker_remove_snap: false

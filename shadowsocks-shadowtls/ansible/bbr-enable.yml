@@ -1,0 +1,52 @@
+---
+# Enable BBR congestion control and kernel network tuning
+# Usage: ansible-playbook -i inventory.ini bbr-enable.yml
+
+- name: Enable BBR and kernel tuning
+  hosts: remote_server
+  become: true
+  tasks:
+    - name: Check kernel version
+      ansible.builtin.command: uname -r
+      register: kernel_version
+      changed_when: false
+
+    - name: Display kernel version
+      ansible.builtin.debug:
+        msg: "Kernel version: {{ kernel_version.stdout }}"
+
+    - name: Enable BBR via sysctl
+      ansible.posix.sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        sysctl_set: true
+        state: present
+        reload: true
+      loop:
+        - { name: 'net.core.default_qdisc', value: 'fq' }
+        - { name: 'net.ipv4.tcp_congestion_control', value: 'bbr' }
+        - { name: 'net.ipv4.tcp_fastopen', value: '3' }
+        - { name: 'net.core.somaxconn', value: '65535' }
+        - { name: 'net.ipv4.tcp_max_syn_backlog', value: '65535' }
+        - { name: 'net.ipv4.tcp_tw_reuse', value: '1' }
+
+    - name: Persist sysctl settings
+      ansible.builtin.copy:
+        content: |
+          net.core.default_qdisc=fq
+          net.ipv4.tcp_congestion_control=bbr
+          net.ipv4.tcp_fastopen=3
+          net.core.somaxconn=65535
+          net.ipv4.tcp_max_syn_backlog=65535
+          net.ipv4.tcp_tw_reuse=1
+        dest: /etc/sysctl.d/99-bbr.conf
+        mode: '0644'
+
+    - name: Verify BBR is loaded
+      ansible.builtin.command: sysctl net.ipv4.tcp_congestion_control
+      register: bbr_check
+      changed_when: false
+
+    - name: Display BBR status
+      ansible.builtin.debug:
+        msg: "BBR status: {{ bbr_check.stdout }}"

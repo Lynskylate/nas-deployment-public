@@ -1,0 +1,48 @@
+---
+- name: Verify aliyun legacy proxy cleanup
+  hosts: edge_aliyun
+  become: true
+
+  tasks:
+    - name: Check cleanup marker exists
+      ansible.builtin.stat:
+        path: "{{ legacy_proxy_cleanup_marker }}"
+      register: cleanup_marker
+
+    - name: Assert cleanup marker exists
+      ansible.builtin.assert:
+        that:
+          - cleanup_marker.stat.exists
+        fail_msg: "Cleanup marker missing: {{ legacy_proxy_cleanup_marker }}"
+
+    - name: Gather service facts
+      ansible.builtin.service_facts:
+
+    - name: Assert mihomo is not active
+      ansible.builtin.assert:
+        that:
+          - "'mihomo.service' not in ansible_facts.services or ansible_facts.services['mihomo.service'].state != 'running'"
+        fail_msg: "mihomo is still running on aliyun"
+
+    - name: Assert legacy proxy ports are closed
+      ansible.builtin.shell: |
+        if ss -tulnp | grep -Eq ':(7890|8888|1080)\b'; then
+          echo "legacy proxy port still open"
+          exit 1
+        fi
+      changed_when: false
+
+    - name: Assert legacy paths are removed
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /etc/mihomo
+        - /usr/local/bin/mihomo
+      register: legacy_paths
+
+    - name: Fail when legacy paths still exist
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists
+        fail_msg: "Legacy path still exists: {{ item.item }}"
+      loop: "{{ legacy_paths.results }}"

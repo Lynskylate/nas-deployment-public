@@ -1,0 +1,8 @@
+---
+- name: Deploy project runtime host baseline on GTR
+  hosts: gtr_core
+  become: true
+
+  roles:
+    - role: project-runtime-host
+

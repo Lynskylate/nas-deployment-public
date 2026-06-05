@@ -1,0 +1,22 @@
+---
+- name: Verify GTR proxy capability is unchanged
+  hosts: gtr_core
+  become: true
+
+  tasks:
+    - name: Check expected proxy ports on GTR
+      ansible.builtin.shell: |
+        set -e
+        ss -tulnp | grep -q ':1080 '
+        ss -tulnp | grep -q ':7890 '
+      changed_when: false
+
+    - name: Check key proxy services on GTR when installed
+      ansible.builtin.service_facts:
+
+    - name: Assert gtr services are not force-disabled by edge rollout
+      ansible.builtin.assert:
+        that:
+          - "'shadowsocks-client.service' not in ansible_facts.services or ansible_facts.services['shadowsocks-client.service'].status != 'not-found'"
+          - "'mihomo.service' not in ansible_facts.services or ansible_facts.services['mihomo.service'].status != 'not-found'"
+        fail_msg: "GTR proxy stack was unexpectedly removed"

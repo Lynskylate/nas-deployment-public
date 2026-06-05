@@ -1,0 +1,9 @@
+[Service]
+ExecStart=
+ExecStart=/usr/local/node_exporter/node_exporter \
+    --web.listen-address=:9100 \
+    --path.procfs=/proc \
+    --path.sysfs=/sys \
+    --path.rootfs=/ \
+    --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc) \
+    --collector.textfile.directory={{ tailscale_exitnode_textfile_dir }}

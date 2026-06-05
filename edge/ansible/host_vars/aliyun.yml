@@ -1,0 +1,21 @@
+---
+cleanup_legacy_proxy: true
+envoy_bin_path: "/usr/bin"
+edge_manage_envoy_binary_dir: false
+edge_tunnel_server_enabled: false
+
+# Aliyun edge node only exposes edge-proxy functions.
+envoy_domain_routes:
+  - name: node_exporter_metrics
+    mode: http_plaintext
+    path_prefix: "/metrics"
+    cluster: node_exporter
+  - name: envoy_admin_metrics
+    mode: http_plaintext
+    path_prefix: "/stats/prometheus"
+    cluster: envoy_admin
+
+# Aliyun pushes Envoy logs to GTR via Tailscale.
+edge_vector_sink_type: "victorialogs"
+victorialogs_host: "gtr.tail414c32.ts.net"
+victorialogs_port: 8429

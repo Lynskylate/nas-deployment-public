@@ -1,0 +1,58 @@
+# Vector Configuration for Mihomo Log Collection
+# Collects logs from systemd journal and forwards to VictoriaLogs
+
+# Source: Mihomo systemd journal logs
+sources:
+  mihomo_journal:
+    type: journald
+    journal_directory: /var/log/journal
+    include_units:
+      - mihomo.service
+
+# Transform: Parse and enrich Mihomo logs
+transforms:
+  # Parse Mihomo log entries and extract structured data
+  mihomo_parse:
+    inputs:
+      - mihomo_journal
+    type: remap
+    source: |
+      # Set common fields
+      .service = "mihomo"
+      .server = "gtr"
+      .env = "production"
+
+      # Parse timestamp
+      .timestamp = parse_timestamp(.timestamp, "%Y-%m-%dT%H:%M:%S%.fZ") ??
+                    parse_timestamp(.__REALTIME_TIMESTAMP, "%s") ??
+                    now()
+
+      # Set log level
+      .log_level = "INFO"
+
+  # Enrich with hostname and metadata
+  mihomo_enriched:
+    inputs:
+      - mihomo_parse
+    type: remap
+    source: |
+      .host = get_hostname!()
+      .container_name = "mihomo"
+
+# Sink: Forward to VictoriaLogs (using Elasticsearch API)
+sinks:
+  victoria_logs_mihomo:
+    type: elasticsearch
+    inputs:
+      - mihomo_enriched
+    endpoints:
+      - http://127.0.0.1:8429/insert/elasticsearch/
+    mode: bulk
+    api_version: v8
+    batch:
+      max_bytes: 1048576
+      timeout_secs: 5
+    query:
+      _msg_field: message
+      _time_field: timestamp
+      _stream_fields: host,container_name

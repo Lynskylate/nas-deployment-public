@@ -1,0 +1,119 @@
+#                                    __   __  __
+#                                    \ \ / / / /
+#                                     \ V / / /
+#                                      \_/  \/
+#
+#                                    V E C T O R
+#                                   Configuration
+#
+# ------------------------------------------------------------------------------
+# Website: https://vector.dev
+# Docs: https://vector.dev/docs
+# ------------------------------------------------------------------------------
+
+# Change this to use a non-default directory for Vector data storage:
+data_dir: /var/lib/vector
+
+# ------------------------------------------------------------------------------
+# Sources
+# ------------------------------------------------------------------------------
+
+sources:
+  # Envoy log collection from /var/log/envoy
+  envoy_logs:
+    type: file
+    include:
+      - /var/log/envoy/access.log
+    read_from: beginning
+    ignore_older_secs: 86400
+
+  # Network monitoring logs
+  network_monitor_logs:
+    type: file
+    include:
+      - /var/log/network-monitor/network-monitor.log
+    read_from: end
+    ignore_older_secs: 86400
+
+# ------------------------------------------------------------------------------
+# Transforms
+# ------------------------------------------------------------------------------
+
+transforms:
+  # Parse and transform Envoy logs
+  parse_envoy_logs:
+    type: remap
+    inputs:
+      - envoy_logs
+    source: |
+      # Add host and container_name fields for VictoriaLogs stream fields
+      .host = get_hostname!()
+      .container_name = "envoy"
+
+      # Ensure timestamp field exists
+      if !exists(.timestamp) {
+        .timestamp = now()
+      }
+
+  # Parse network monitoring JSON logs
+  parse_network_monitor_logs:
+    type: remap
+    inputs:
+      - network_monitor_logs
+    source: |
+      # Parse JSON log entry
+      parsed = parse_json!(.message)
+
+      # Add host and container_name fields for VictoriaLogs stream fields
+      .host = get_hostname!()
+      .container_name = "network-monitor"
+
+      # Extract JSON fields
+      .site = parsed.site
+      .url = parsed.url
+      .status_code = parsed.status_code
+      .response_time = parsed.response_time
+      .proxy = parsed.proxy
+      .expected_route = parsed.expected_route
+      .category = parsed.category
+
+      # Use timestamp from log or current time
+      if exists(parsed.timestamp) {
+        .timestamp = parsed.timestamp
+      } else {
+        .timestamp = now()
+      }
+
+      # Categorize by expected routing for easier querying
+      .route_type = if parsed.expected_route == "direct" {
+        "domestic"
+      } else {
+        "international"
+      }
+
+# ------------------------------------------------------------------------------
+# Sinks
+# ------------------------------------------------------------------------------
+
+sinks:
+  # Send logs to VictoriaLogs
+  vlogs:
+    inputs:
+      - parse_envoy_logs
+      - parse_network_monitor_logs
+    type: elasticsearch
+    endpoints:
+      - http://localhost:8429/insert/elasticsearch/
+    mode: bulk
+    api_version: v8
+    healthcheck:
+      enabled: false
+    query:
+      _msg_field: message
+      _time_field: timestamp
+      _stream_fields: host,container_name
+
+# Vector's GraphQL API
+api:
+  enabled: true
+  address: 127.0.0.1:8686

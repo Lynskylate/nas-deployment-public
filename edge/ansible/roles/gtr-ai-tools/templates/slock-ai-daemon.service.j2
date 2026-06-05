@@ -1,0 +1,20 @@
+[Unit]
+Description=Slock AI Daemon ({{ slock_ai_label }})
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=HOME={{ gtr_ai_home }}
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+EnvironmentFile={{ slock_ai_env_file }}
+WorkingDirectory={{ gtr_ai_home }}
+ExecStart=/usr/bin/npx --yes {{ slock_ai_npx_package }} --server-url ${SLOCK_AI_SERVER_URL} --api-key ${SLOCK_AI_API_KEY}
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=slock-ai-daemon
+
+[Install]
+WantedBy=default.target

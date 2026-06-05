@@ -1,0 +1,58 @@
+---
+# Shadow-TLS Client Role
+
+- name: Create shadowtls user
+  ansible.builtin.user:
+    name: shadowtls
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+    state: present
+
+- name: Check if shadow-tls binary exists
+  ansible.builtin.stat:
+    path: "{{ stls_client_bin_path }}/shadow-tls"
+  register: stls_binary
+
+- name: Create installation directory
+  ansible.builtin.file:
+    path: "{{ stls_client_bin_path }}"
+    state: directory
+    mode: '0755'
+  when: not stls_binary.stat.exists
+
+- name: Download shadow-tls binary
+  ansible.builtin.get_url:
+    url: "{{ shadowtls_download_url }}/{{ shadowtls_version }}/shadow-tls-x86_64-unknown-linux-musl"
+    dest: "{{ stls_client_bin_path }}/shadow-tls"
+    mode: '0755'
+    timeout: 300
+  environment: "{{ {'http_proxy': github_download_proxy, 'https_proxy': github_download_proxy} if (github_download_proxy | default('') | length > 0) else {} }}"
+  register: download_result
+  until: download_result is succeeded
+  retries: 5
+  delay: 10
+  when: not stls_binary.stat.exists
+  notify: restart shadow-tls-client
+
+- name: Deploy systemd service file
+  ansible.builtin.template:
+    src: shadow-tls-client.service.j2
+    dest: /etc/systemd/system/shadow-tls-client.service
+    mode: '0644'
+  notify:
+    - reload systemd
+    - restart shadow-tls-client
+
+- name: Enable and start shadow-tls-client
+  ansible.builtin.systemd:
+    name: shadow-tls-client
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Cleanup temp files
+  ansible.builtin.file:
+    path: /tmp/shadow-tls-x86_64-unknown-linux-musl
+    state: absent
+  ignore_errors: true

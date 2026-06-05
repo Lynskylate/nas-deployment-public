@@ -1,0 +1,121 @@
+#                                    __   __  __
+#                                    \ \ / / / /
+#                                     \ V / / /
+#                                      \_/  \/
+#
+#                                    V E C T O R
+#                                   Configuration
+#
+# ------------------------------------------------------------------------------
+# Website: https://vector.dev
+# Docs: https://vector.dev/docs
+# Chat: https://chat.vector.dev
+# ------------------------------------------------------------------------------
+
+# Change this to use a non-default directory for Vector data storage:
+data_dir: "/var/lib/vector"
+
+# ------------------------------------------------------------------------------
+# Sources
+# ------------------------------------------------------------------------------
+
+# Envoy log collection from /var/log/envoy
+sources:
+  envoy_logs:
+    type: "file"
+    include:
+      - "/var/log/envoy/access.log"
+    read_from: "beginning"
+    ignore_older_secs: 86400
+
+  # Network monitoring logs
+  network_monitor_logs:
+    type: "file"
+    include:
+      - "/var/log/network-monitor/network-monitor.log"
+    read_from: "end"
+    ignore_older_secs: 86400
+
+# ------------------------------------------------------------------------------
+# Transforms
+# ------------------------------------------------------------------------------
+
+# Parse and transform Envoy logs
+transforms:
+  parse_envoy_logs:
+    type: "remap"
+    inputs: ["envoy_logs"]
+    source: |
+      # Add host and container_name fields for VictoriaLogs stream fields
+      .host = get_hostname!()
+      .container_name = "envoy"
+
+      # Ensure timestamp field exists
+      if !exists(.timestamp) {
+        .timestamp = now()
+      }
+
+  # Parse network monitoring JSON logs
+  parse_network_monitor_logs:
+    type: "remap"
+    inputs: ["network_monitor_logs"]
+    source: |
+      # Parse JSON log entry
+      parsed = parse_json!(.message)
+
+      # Add host and container_name fields for VictoriaLogs stream fields
+      .host = get_hostname!()
+      .container_name = "network-monitor"
+
+      # Extract JSON fields
+      .site = parsed.site
+      .url = parsed.url
+      .status_code = parsed.status_code
+      .response_time = parsed.response_time
+      .proxy = parsed.proxy
+      .test_type = parsed.test_type
+
+      # Use timestamp from log or current time
+      if exists(parsed.timestamp) {
+        .timestamp = parsed.timestamp
+      } else {
+        .timestamp = now()
+      }
+
+      # Determine connection status
+      .status = if parsed.status_code == 200 {
+        "success"
+      } else if parsed.status_code == "000" {
+        "failed"
+      } else {
+        "error"
+      }
+
+# ------------------------------------------------------------------------------
+# Sinks
+# ------------------------------------------------------------------------------
+
+# Send logs to VictoriaLogs
+sinks:
+  vlogs:
+    inputs:
+      - parse_envoy_logs
+      - parse_network_monitor_logs
+    type: "elasticsearch"
+    endpoints:
+      - "http://localhost:8429/insert/elasticsearch/"
+    mode: "bulk"
+    api_version: "v8"
+    healthcheck:
+      enabled: false
+    query:
+      _msg_field: "message"
+      _time_field: "timestamp"
+      _stream_fields: "host,container_name"
+
+# Vector's GraphQL API (disabled by default)
+# Uncomment to try it out with the `vector top` command or
+# in your browser at http://localhost:8686
+api:
+  enabled: true
+  address: "127.0.0.1:8686"

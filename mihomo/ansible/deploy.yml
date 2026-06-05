@@ -1,0 +1,74 @@
+---
+# Deploy Mihomo to GTR Server
+# Usage: ansible-playbook -i inventory.ini deploy.yml
+
+- name: Deploy Mihomo to GTR Server
+  hosts: client_server
+  become: true
+
+  pre_tasks:
+    - name: Display deployment info
+      ansible.builtin.debug:
+        msg:
+          - "Deploying Mihomo {{ mihomo_version }} to: {{ inventory_hostname }}"
+          - "Proxy provider configured: {{ (proxy_provider_url | default('')) | length > 0 }}"
+          - "ShadowTLS: {{ shadowtls_server }}:{{ shadowtls_port }}"
+          - "Mixed Port: {{ mihomo_mixed_port }}"
+          - "Mode: HTTP/SOCKS Proxy"
+
+  roles:
+    - role: mihomo
+
+  post_tasks:
+    - name: Verify mihomo service is running
+      ansible.builtin.systemd:
+        name: mihomo
+        state: started
+
+    - name: Check mihomo port listening
+      ansible.builtin.shell: |
+        ss -tulnp | grep -E ':({{ mihomo_mixed_port }}|9090)' || echo "Port check completed"
+      register: port_check
+      changed_when: false
+
+    - name: Display port status
+      ansible.builtin.debug:
+        var: port_check.stdout_lines
+
+    - name: Test mihomo API (authenticated)
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9090/proxies"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ mihomo_secret }}"
+        return_content: true
+      register: api_test
+
+    - name: Assert mihomo API check succeeded
+      ansible.builtin.assert:
+        that:
+          - api_test.status == 200
+          - api_test.json.proxies is defined
+        fail_msg: "Mihomo API auth/check failed"
+
+    - name: Display deployment summary
+      ansible.builtin.debug:
+        msg:
+          - "Mihomo deployed and running"
+          - "Mixed listener (HTTP/SOCKS): {{ mihomo_mixed_port }}"
+          - "API Controller: http://127.0.0.1:9090"
+          - ""
+          - "Endpoints:"
+          - "  - HTTP/SOCKS Proxy: {{ mihomo_mixed_port }}"
+          - "  - API: http://{{ ansible_host | default(inventory_hostname) }}:9090/"
+          - "  - Web UI: http://{{ ansible_host | default(inventory_hostname) }}:9090/ui"
+          - ""
+          - "Usage:"
+          - "  export http_proxy=http://{{ ansible_host | default(inventory_hostname) }}:{{ mihomo_mixed_port }}"
+          - "  export https_proxy=http://{{ ansible_host | default(inventory_hostname) }}:{{ mihomo_mixed_port }}"
+          - "  export all_proxy=socks5://{{ ansible_host | default(inventory_hostname) }}:{{ mihomo_mixed_port }}"
+          - ""
+          - "Proxy Groups:"
+          - "  - Proxy: Select from subscription"
+          - "  - Auto: Auto-select fastest from subscription"
+          - "  - ShadowTLS: Your remote ShadowTLS proxy"

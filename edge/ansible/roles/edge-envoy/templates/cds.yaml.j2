@@ -1,0 +1,71 @@
+---
+{% set used_clusters = envoy_domain_routes | map(attribute='cluster') | list %}
+resources:
+{% if 'shadow_tls_server' in used_clusters %}
+  - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
+    name: shadow_tls_server
+    connect_timeout: 5s
+    type: STATIC
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: shadow_tls_server
+      endpoints:
+        - lb_endpoints:
+            - endpoint:
+                    address:
+                      socket_address:
+                        address: 127.0.0.1
+                        port_value: {{ shadowtls_server_listen_port }}
+    upstream_connection_options:
+      tcp_keepalive: {}
+{% endif %}
+
+  - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
+    name: node_exporter
+    connect_timeout: 5s
+    type: STATIC
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: node_exporter
+      endpoints:
+        - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address:
+                    address: 127.0.0.1
+                    port_value: {{ node_exporter_port }}
+
+  - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
+    name: envoy_admin
+    connect_timeout: 5s
+    type: STATIC
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: envoy_admin
+      endpoints:
+        - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address:
+                    address: 127.0.0.1
+                    port_value: {{ envoy_admin_port }}
+
+{% for cluster in envoy_additional_clusters %}
+  - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
+    name: {{ cluster.name }}
+    connect_timeout: {{ cluster.connect_timeout | default('5s') }}
+    type: {{ cluster.type | default('STATIC') }}
+    lb_policy: ROUND_ROBIN
+{% if cluster.http2 | default(false) %}
+    http2_protocol_options: {}
+{% endif %}
+    load_assignment:
+      cluster_name: {{ cluster.name }}
+      endpoints:
+        - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address:
+                    address: {{ cluster.address }}
+                    port_value: {{ cluster.port }}
+{% endfor %}

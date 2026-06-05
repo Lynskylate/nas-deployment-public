@@ -1,0 +1,31 @@
+[Unit]
+Description=Mihomo WebSocket Logs Collector
+Documentation=https://github.com/MetaCubeX/mihomo-meta
+After=mihomo.service victorialogs.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nobody
+Group=nogroup
+
+Environment="MIHOMO_API=http://127.0.0.1:9090"
+Environment="MIHOMO_SECRET={{ mihomo_secret }}"
+Environment="VICTORIALOGS_URL=http://127.0.0.1:8429"
+Environment="SERVER_LABEL={{ server_label }}"
+Environment="LOG_LEVEL=info"
+
+ExecStart=/usr/local/bin/mihomo-logs-collector.py
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+TimeoutStartSec=30
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

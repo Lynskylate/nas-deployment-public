@@ -1,0 +1,134 @@
+# config file version
+apiVersion: 1
+
+# List of contact points to import or update
+contactPoints:
+  - orgId: 1
+    name: 飞书告警通知
+    receivers:
+      - uid: feishu_webhook_receiver
+        type: webhook
+        settings:
+          url: https://www.feishu.cn/flow/api/trigger-webhook/<render-from-private-vault>
+          httpMethod: POST
+          body: '{
+            "msg_type": "interactive",
+            "card": {
+              "header": {
+                "title": {
+                  "tag": "plain_text",
+                  "content": "{{ .CommonLabels.alertname }}"
+                },
+                "template": "{{ if eq .Status \"firing\" }}red{{ else }}green{{ end }}"
+              },
+              "elements": [
+                {
+                  "tag": "div",
+                  "fields": [
+                    {
+                      "is_short": true,
+                      "text": {
+                        "tag": "lark_md",
+                        "content": "**状态**: {{ .Status }}\n**严重程度**: {{ .CommonLabels.severity }}\n**告警时间**: {{ .StartsAt.Format \"2006-01-02 15:04:05\" }}"
+                      }
+                    },
+                    {
+                      "is_short": true,
+                      "text": {
+                        "tag": "lark_md",
+                        "content": "**实例**: {{ .CommonLabels.instance }}\n**任务**: {{ .CommonLabels.job }}\n**团队**: {{ .CommonLabels.team }}"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "tag": "div",
+                  "text": {
+                    "tag": "lark_md",
+                    "content": "**描述**: {{ range .Alerts }}{{ .Annotations.description }}{{ end }}"
+                  }
+                },
+                {
+                  "tag": "action",
+                  "actions": [
+                    {
+                      "tag": "button",
+                      "text": {
+                        "tag": "plain_text",
+                        "content": "查看 Grafana"
+                      },
+                      "type": "default",
+                      "url": "http://gtr:3000"
+                    },
+                    {
+                      "tag": "button",
+                      "text": {
+                        "tag": "plain_text",
+                        "content": "查看详情"
+                      },
+                      "type": "primary",
+                      "url": "{{ .ExternalURL }}"
+                    }
+                  ]
+                }
+              ]
+            }
+          }'
+          # 飞书需要的消息头
+          headers:
+            Content-Type: application/json
+
+# List of notification policies to import or update
+policies:
+  - orgId: 1
+    receiver: 飞书告警通知
+    group_by:
+      - alertname
+      - severity
+      - instance
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h
+    routes:
+      # 严重告警立即发送
+      - matchers:
+          - severity =~ "critical"
+        receiver: 飞书告警通知
+        group_wait: 10s
+        group_interval: 2m
+        repeat_interval: 1h
+      # 警告级别告警
+      - matchers:
+          - severity =~ "warning"
+        receiver: 飞书告警通知
+        group_wait: 30s
+        group_interval: 5m
+        repeat_interval: 3h
+
+# List of templates to import or update
+templates:
+  - orgID: 1
+    name: feishu_default_template
+    template: '{{ define "feishu.default.title" }}[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .GroupLabels.alertname }}{{ end }}
+
+{{ define "feishu.default.body" }}
+{{ range .Alerts }}
+**告警**: {{ .Labels.alertname }}
+**严重程度**: {{ .Labels.severity }}
+**实例**: {{ .Labels.instance }}
+**描述**: {{ .Annotations.description }}
+**开始时间**: {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+{{ if .EndsAt }}**结束时间**: {{ .EndsAt.Format "2006-01-02 15:04:05" }}{{ end }}
+---
+{{ end }}
+{{ end }}'
+
+# Mute time intervals example (maintenance windows)
+muteTimes:
+  - orgId: 1
+    name: 日常维护时段
+    time_intervals:
+      - times:
+          - start_time: '02:00'
+            end_time: '04:00'
+        weekdays: ['saturday', 'sunday']

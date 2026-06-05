@@ -1,0 +1,89 @@
+---
+# Mihomo Installation and Configuration
+
+- name: Create mihomo user
+  ansible.builtin.user:
+    name: mihomo
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+    state: present
+
+- name: Create mihomo directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: mihomo
+    group: mihomo
+    mode: '0750'
+  loop:
+    - "{{ mihomo_config_path }}"
+    - "{{ mihomo_home_path }}"
+    - "{{ mihomo_config_path }}/providers"
+    - "{{ mihomo_config_path }}/ruleset"
+
+- name: Check if mihomo binary exists
+  ansible.builtin.stat:
+    path: "{{ mihomo_bin_path }}/mihomo"
+  register: mihomo_binary
+
+- name: Download mihomo
+  ansible.builtin.get_url:
+    url: "{{ mihomo_download_url }}/{{ mihomo_version }}/mihomo-linux-amd64-compatible-{{ mihomo_version }}.gz"
+    dest: /tmp/mihomo.gz
+    mode: '0644'
+    timeout: 300
+  environment: "{{ {'http_proxy': github_download_proxy, 'https_proxy': github_download_proxy} if (github_download_proxy | default('') | length > 0) else {} }}"
+  register: download_result
+  until: download_result is succeeded
+  retries: 5
+  delay: 10
+  when: not mihomo_binary.stat.exists
+
+- name: Extract mihomo binary
+  ansible.builtin.shell: gunzip -c /tmp/mihomo.gz > /tmp/mihomo
+  args:
+    creates: /tmp/mihomo
+  when: not mihomo_binary.stat.exists
+
+- name: Install mihomo binary
+  ansible.builtin.copy:
+    src: /tmp/mihomo
+    dest: "{{ mihomo_bin_path }}/mihomo"
+    mode: '0755'
+    remote_src: true
+  when: not mihomo_binary.stat.exists
+  notify: restart mihomo
+
+- name: Deploy mihomo configuration
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: "{{ mihomo_config_path }}/config.yaml"
+    mode: '0640'
+    owner: mihomo
+    group: mihomo
+  notify: restart mihomo
+
+- name: Deploy systemd service file
+  ansible.builtin.template:
+    src: mihomo.service.j2
+    dest: /etc/systemd/system/mihomo.service
+    mode: '0644'
+  notify:
+    - reload systemd
+    - restart mihomo
+
+- name: Enable mihomo service
+  ansible.builtin.systemd:
+    name: mihomo
+    enabled: true
+    daemon_reload: true
+
+- name: Cleanup temp files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /tmp/mihomo.gz
+    - /tmp/mihomo
+  ignore_errors: true

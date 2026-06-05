@@ -1,0 +1,50 @@
+---
+# Shadowsocks + Shadow-TLS Configuration Variables
+
+# Version configuration
+shadowsocks_version: "v1.18.2"
+shadowtls_version: "v0.2.25"
+shadowsocks_download_url: "https://github.com/shadowsocks/shadowsocks-rust/releases/download"
+shadowtls_download_url: "https://github.com/ihciah/shadow-tls/releases/download"
+
+# Shadowsocks configuration
+shadowsocks_method: "aes-256-gcm"
+shadowsocks_timeout: 300
+shadowsocks_server_port: 8388
+shadowsocks_client_port: 1080
+shadowsocks_client_local_address: "0.0.0.0"
+
+# Shadow-TLS configuration
+shadowtls_tls_port: 443
+shadowtls_client_listen_port: 8443
+shadowtls_sni_server: "www.microsoft.com"
+shadowtls_sni_port: 443
+shadowtls_server_listen_port: 8443
+
+# Remote server configuration
+remote_server_ip: "66.154.100.187"
+
+# Installation paths
+ss_server_bin_path: "/usr/local/shadowsocks-server"
+ss_client_bin_path: "/usr/local/shadowsocks-client"
+stls_server_bin_path: "/usr/local/shadow-tls-server"
+stls_client_bin_path: "/usr/local/shadow-tls-client"
+
+# Envoy configuration
+envoy_version: "v1.37.0"
+envoy_download_url: "https://github.com/envoyproxy/envoy/releases/download"
+envoy_bin_path: "/usr/local/envoy"
+envoy_admin_port: 9901
+envoy_log_path: "/var/log/envoy"
+envoy_log_max_size: "100M"
+envoy_log_rotate: 7
+
+# Node Exporter configuration
+node_exporter_version: "1.8.2"
+node_exporter_download_url: "https://github.com/prometheus/node_exporter/releases/download"
+node_exporter_bin_path: "/usr/local/node_exporter"
+node_exporter_port: 9100
+
+# VictoriaMetrics configuration
+vm_config_path: "/usr/local/victoriametrics"
+vm_scrape_config: "victoriametrics_sd.yaml"

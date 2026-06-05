@@ -1,0 +1,167 @@
+# 改进的 Mihomo Proxy Groups 配置
+# 使用不同场景的测速 URL
+
+proxy-groups:
+  # 主代理组 - 手动选择
+  - name: "Proxy"
+    type: select
+    use:
+      - subscription
+    proxies:
+      - Auto
+      - Auto-CN
+      - Auto-Global
+    url: https://cp.cloudflare.com/generate_204
+
+  # 通用自动选择 - 使用 Cloudflare (全球分布好)
+  - name: "Auto"
+    type: url-test
+    use:
+      - subscription
+    url: https://cp.cloudflare.com/generate_204
+    interval: 300
+    tolerance: 50
+
+  # 国内流量组 - 强制 DIRECT，避免国内流量走订阅节点
+  - name: "Auto-CN"
+    type: select
+    proxies:
+      - DIRECT
+
+  # 国际网站优化 - 使用 Google/YouTube
+  - name: "Auto-Global"
+    type: url-test
+    use:
+      - subscription
+    url: https://www.google.com/generate_204
+    interval: 300
+    tolerance: 80
+
+  # 流媒体 - 使用 YouTube
+  - name: "Streaming"
+    type: url-test
+    use:
+      - subscription
+    url: https://www.youtube.com/generate_204
+    interval: 300
+    tolerance: 100
+
+  # Telegram - 使用低延迟测速
+  - name: "Telegram"
+    type: url-test
+    use:
+      - subscription
+    url: https://core.telegram.org/getProxyConfig
+    interval: 300
+    tolerance: 50
+
+  # GitHub - 使用 GitHub API
+  - name: "GitHub"
+    type: url-test
+    use:
+      - subscription
+    url: https://api.github.com
+    interval: 300
+    tolerance: 80
+
+  # ShadowTLS 分离组
+  - name: "ShadowTLS"
+    type: select
+    proxies:
+      - ShadowTLS-Remote
+      - DIRECT
+
+  # 广告拦截
+  - name: "AdBlock"
+    type: select
+    proxies:
+      - REJECT
+      - DIRECT
+
+# 改进的规则 - 按场景分流
+rules:
+  # 本地网络 - DIRECT
+  - DOMAIN-SUFFIX,local,DIRECT
+  - IP-CIDR,127.0.0.0/8,DIRECT
+  - IP-CIDR,172.16.0.0/12,DIRECT
+  - IP-CIDR,192.168.0.0/16,DIRECT
+  - IP-CIDR,10.0.0.0/8,DIRECT
+
+  # 国内服务 - 使用 Auto-CN (DIRECT only)
+  - DOMAIN-SUFFIX,cn,Auto-CN
+  - DOMAIN-KEYWORD,baidu,Auto-CN
+  - DOMAIN-KEYWORD,taobao,Auto-CN
+  - DOMAIN-KEYWORD,alipay,Auto-CN
+  - DOMAIN-KEYWORD,tmall,Auto-CN
+  - DOMAIN-KEYWORD,jd.com,Auto-CN
+  - DOMAIN-KEYWORD,bilibili,Auto-CN
+  - DOMAIN-KEYWORD,netease,Auto-CN
+  - DOMAIN-KEYWORD,qq,Auto-CN
+  - DOMAIN-KEYWORD,weixin,Auto-CN
+  - GEOIP,CN,Auto-CN
+
+  # GitHub - 使用 GitHub 专用组
+  - DOMAIN-SUFFIX,github.com,GitHub
+  - DOMAIN-SUFFIX,githubusercontent.com,GitHub
+  - DOMAIN-SUFFIX,githubassets.com,GitHub
+  - DOMAIN-SUFFIX,avatars.githubusercontent.com,GitHub
+
+  # Google 服务 - 使用 Auto-Global
+  - DOMAIN-SUFFIX,google.com,Auto-Global
+  - DOMAIN-SUFFIX,googleapis.com,Auto-Global
+  - DOMAIN-SUFFIX,googleusercontent.com,Auto-Global
+  - DOMAIN-SUFFIX,gstatic.com,Auto-Global
+  - DOMAIN-SUFFIX,googletagmanager.com,Auto-Global
+  - DOMAIN-SUFFIX,google-analytics.com,Auto-Global
+  - DOMAIN-SUFFIX,youtube.com,Streaming
+  - DOMAIN-SUFFIX,ytimg.com,Streaming
+  - DOMAIN-SUFFIX,googlevideo.com,Streaming
+
+  # 流媒体
+  - DOMAIN-SUFFIX,netflix.com,Streaming
+  - DOMAIN-SUFFIX,nflxvideo.net,Streaming
+  - DOMAIN-SUFFIX,disney.com,Streaming
+  - DOMAIN-SUFFIX,disneyplus.com,Streaming
+  - DOMAIN-SUFFIX,hulu.com,Streaming
+  - DOMAIN-SUFFIX,hbomax.com,Streaming
+  - DOMAIN-SUFFIX,primevideo.com,Streaming
+  - DOMAIN-SUFFIX,twitch.tv,Streaming
+
+  # Telegram
+  - DOMAIN-SUFFIX,telegram.org,Telegram
+  - DOMAIN-SUFFIX,t.me,Telegram
+  - IP-CIDR,91.108.0.0/16,Telegram
+  - IP-CIDR,149.154.160.0/20,Telegram
+
+  # OpenAI / ChatGPT - 使用 Auto-Global
+  - DOMAIN-SUFFIX,openai.com,Auto-Global
+  - DOMAIN-SUFFIX,chatgpt.com,Auto-Global
+  - DOMAIN-SUFFIX,oaistatic.com,Auto-Global
+  - DOMAIN-SUFFIX,auth0.com,Auto-Global
+
+  # Microsoft - 使用 Auto-Global
+  - DOMAIN-SUFFIX,microsoft.com,Auto-Global
+  - DOMAIN-SUFFIX,office.com,Auto-Global
+  - DOMAIN-SUFFIX,skype.com,Auto-Global
+  - DOMAIN-SUFFIX,linkedin.com,Auto-Global
+
+  # Apple - 使用 Auto-Global
+  - DOMAIN-SUFFIX,apple.com,Auto-Global
+  - DOMAIN-SUFFIX,icloud.com,Auto-Global
+  - DOMAIN-SUFFIX,cdn-apple.com,Auto-Global
+
+  # 社交媒体 - 使用 Auto-Global
+  - DOMAIN-SUFFIX,twitter.com,Auto-Global
+  - DOMAIN-SUFFIX,x.com,Auto-Global
+  - DOMAIN-SUFFIX,facebook.com,Auto-Global
+  - DOMAIN-SUFFIX,instagram.com,Auto-Global
+  - DOMAIN-SUFFIX,tiktok.com,Auto-Global
+  - DOMAIN-SUFFIX,tiktokcdn.com,Auto-Global
+
+  # 开发工具 - 使用 Auto-Global
+  - DOMAIN-SUFFIX,stackoverflow.com,Auto-Global
+  - DOMAIN-SUFFIX,cloudflare.com,Auto-Global
+  - DOMAIN-SUFFIX,docker.com,Auto-Global
+
+  # 默认规则 - 使用通用自动选择
+  - MATCH,Auto

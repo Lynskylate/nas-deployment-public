@@ -1,0 +1,9 @@
+[Unit]
+Description=Deployment In Progress
+# This target is started when a deployment begins and stopped when it ends
+# Other deployments should wait for this to become inactive
+RefuseManualStart=no
+RefuseManualStop=no
+# Auto-stop after 30 minutes as safety valve (prevent stuck locks)
+StopWhenUnneeded=yes
+DefaultDependencies=no

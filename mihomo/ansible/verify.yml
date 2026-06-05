@@ -1,0 +1,53 @@
+---
+# Verify Mihomo Deployment
+# Usage: ansible-playbook -i inventory.ini verify.yml
+
+- name: Verify Mihomo Deployment
+  hosts: client_server
+  become: true
+
+  tasks:
+    - name: Check mihomo service status
+      ansible.builtin.systemd:
+        name: mihomo
+      register: service_status
+
+    - name: Display service status
+      ansible.builtin.debug:
+        var: service_status.status.ActiveState
+
+    - name: Check mihomo logs
+      ansible.builtin.shell: |
+        journalctl -u mihomo -n 20 --no-pager
+      register: mihomo_logs
+      changed_when: false
+
+    - name: Display recent logs
+      ansible.builtin.debug:
+        var: mihomo_logs.stdout_lines
+
+    - name: Test mihomo API (authenticated)
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9090/proxies"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ mihomo_secret }}"
+        return_content: true
+      register: proxies_info
+
+    - name: Display available proxies
+      ansible.builtin.debug:
+        var: proxies_info.json
+
+    - name: Test Google via local mihomo proxy
+      ansible.builtin.shell: |
+        timeout 15s curl -sS -o /dev/null -w "%{http_code}" \
+          --proxy http://127.0.0.1:{{ mihomo_mixed_port }} \
+          https://www.google.com/generate_204
+      register: proxy_google_test
+      changed_when: false
+      failed_when: proxy_google_test.rc != 0 or proxy_google_test.stdout not in ["200", "204"]
+
+    - name: Display proxy connectivity result
+      ansible.builtin.debug:
+        msg: "Proxy Google connectivity: HTTP {{ proxy_google_test.stdout }}"

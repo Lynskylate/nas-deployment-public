@@ -1,0 +1,23 @@
+[Unit]
+Description=Vector observability pipeline
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=vector
+Group=vector
+ExecStart={{ vector_bin_path }} --config {{ vector_config_dir }}/vector.yaml
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths={{ vector_data_dir }} {{ vector_log_path }}
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,28 @@
+---
+- name: Install rootless Podman runtime packages
+  ansible.builtin.apt:
+    name: "{{ project_runtime_packages }}"
+    state: present
+    update_cache: true
+
+- name: Ensure shared project runtime directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop: "{{ project_runtime_directories }}"
+
+- name: Install runtime inspection helper
+  ansible.builtin.template:
+    src: project-runtime-report.sh.j2
+    dest: "{{ project_runtime_report_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Verify podman binary is available
+  ansible.builtin.command: podman --version
+  changed_when: false
+

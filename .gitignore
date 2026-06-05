@@ -1,0 +1,8 @@
+*.runtime.yml
+.vault/
+*.decrypted
+*.dec
+*.agekey
+*.agekey.pub
+.env.decrypted
+edge/pki/

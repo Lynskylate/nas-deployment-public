@@ -1,0 +1,14 @@
+{{ envoy_log_path }}/*.log {
+    daily
+    rotate {{ envoy_log_rotate }}
+    size {{ envoy_log_max_size }}
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0644 envoy envoy
+    sharedscripts
+    postrotate
+        systemctl kill -s USR1 envoy >/dev/null 2>&1 || true
+    endscript
+}

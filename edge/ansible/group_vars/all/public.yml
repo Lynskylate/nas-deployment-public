@@ -1,0 +1,118 @@
+github_download_proxy: http://gtr.tail414c32.ts.net:7890
+shadowsocks_version: v1.18.2
+shadowtls_version: v0.2.25
+shadowsocks_download_url: https://github.com/shadowsocks/shadowsocks-rust/releases/download
+shadowtls_download_url: https://github.com/ihciah/shadow-tls/releases/download
+shadowsocks_method: aes-256-gcm
+shadowsocks_timeout: 300
+shadowsocks_server_port: 8388
+shadowsocks_client_port: 1080
+shadowsocks_client_local_address: 127.0.0.1
+shadowtls_tls_port: 443
+shadowtls_sni_server: www.microsoft.com
+shadowtls_sni_port: 443
+shadowtls_server_listen_port: 8443
+shadowtls_client_listen_port: 8443
+remote_server_ip: 66.154.100.187
+ss_server_bin_path: /usr/local/shadowsocks-server
+stls_server_bin_path: /usr/local/shadow-tls-server
+ss_client_bin_path: /usr/local/shadowsocks-client
+stls_client_bin_path: /usr/local/shadow-tls-client
+edge_tunnel_server_enabled: false
+node_exporter_version: 1.8.2
+node_exporter_download_url: https://github.com/prometheus/node_exporter/releases/download
+node_exporter_bin_path: /usr/local/node_exporter
+node_exporter_port: 9100
+envoy_version: v1.37.0
+envoy_download_url: https://github.com/envoyproxy/envoy/releases/download
+envoy_bin_path: /usr/local/envoy
+edge_manage_envoy_binary_dir: true
+envoy_admin_port: 9901
+envoy_log_path: /var/log/envoy
+envoy_log_max_size: 100M
+envoy_log_rotate: 7
+envoy_listener_port: 443
+envoy_http_listener_enabled: true
+envoy_http_listener_port: 80
+envoy_dynamic_config_dir: /etc/envoy/dynamic_config
+envoy_tls_cert_dir: /etc/envoy/certs
+envoy_domain_routes:
+- name: node_exporter_metrics
+  mode: http_plaintext
+  path_prefix: /metrics
+  cluster: node_exporter
+- name: envoy_admin_metrics
+  mode: http_plaintext
+  path_prefix: /stats/prometheus
+  cluster: envoy_admin
+envoy_additional_clusters: []
+edge_vector_enabled: true
+vector_version: 0.53.0
+vector_download_url: https://github.com/vectordotdev/vector/releases/download
+vector_bin_path: /usr/local/bin/vector
+vector_archive_dirname: vector-x86_64-unknown-linux-gnu
+vector_config_dir: /etc/vector
+vector_data_dir: /var/lib/vector
+vector_log_path: /var/log/vector
+edge_vector_sink_type: local_file
+victorialogs_host: gtr.tail414c32.ts.net
+victorialogs_port: 8429
+victoriametrics_host: gtr.tail414c32.ts.net
+victoriametrics_port: 8428
+victoriatraces_host: gtr.tail414c32.ts.net
+victoriatraces_http_port: 9428
+edge_vector_otlp_grpc_listen: 127.0.0.1:4317
+edge_vector_otlp_http_listen: 127.0.0.1:4318
+cleanup_legacy_proxy: false
+legacy_proxy_cleanup_marker: /var/lib/gtr-edge/aliyun-legacy-proxy-cleanup.done
+legacy_proxy_services:
+- mihomo
+- shadowsocks-client
+- shadow-tls-client
+legacy_proxy_paths:
+- /etc/mihomo
+- /usr/local/bin/mihomo
+- /etc/systemd/system/mihomo.service
+- /etc/envoy/htpasswd
+edge_ca_issue_enabled: false
+edge_ca_trust_enabled: false
+edge_ca_local_issued_dir: /tmp/gtr-edge-ca/issued
+edge_ca_trust_target_path: /usr/local/share/ca-certificates/gtr-edge-root-ca.crt
+envoy_tls_certificates: []
+edge_forbidden_proxy_ports:
+- 1080
+- 7890
+- 8888
+edge_proxy_vm_scrape_jobs:
+- job_name: edge_proxy_aliyun
+  scrape_interval: 15s
+  target: 47.120.46.128:80
+  metrics_path: /metrics
+  labels:
+    server: aliyun
+    role: edge_proxy
+- job_name: edge_proxy_remote_proxy
+  scrape_interval: 15s
+  target: 66.154.100.187:80
+  metrics_path: /metrics
+  labels:
+    server: remote_proxy
+    role: edge_proxy
+- job_name: edge_proxy_tencent
+  scrape_interval: 15s
+  target: 129.211.12.63:80
+  metrics_path: /metrics
+  labels:
+    server: tencent
+    role: edge_proxy
+edge_vm_scrape_config_path: /usr/local/victoriametrics/victoriametrics_sd.yaml
+edge_vm_service_name: victoriametrics
+k3s_channel: stable
+k3s_server_url: https://100.121.0.67:6443
+k3s_cluster_cidr: 10.60.0.0/16
+k3s_service_cidr: 10.61.0.0/16
+k3s_cluster_dns: 10.61.0.10
+k3s_flannel_iface: tailscale0
+k3s_disable_components:
+- traefik
+- servicelb

@@ -1,0 +1,26 @@
+[Unit]
+Description=Tailscale Exit Node + Mihomo TUN routing fix
+Documentation=https://tailscale.com/kb/1103/exit-nodes/
+After=tailscaled.service mihomo.service
+BindsTo=tailscaled.service
+Wants=mihomo.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+# Detect WAN interface dynamically (default route)
+Environment=WAN_DETECT=/bin/bash -c '/sbin/ip route show default | awk '\''/default/ {print $5; exit}'\'''
+
+# Fix 1: MASQUERADE - idempotent add with dynamic WAN detection
+ExecStart=/bin/bash -c "WAN=$$({{ ip_binary }} route show default | awk '/default/ {print $$5; exit}'); {{ nft_binary }} list chain ip nat POSTROUTING 2>/dev/null | grep -q \"oifname \\\"$$WAN\\\" masquerade\" || {{ nft_binary }} add rule ip nat POSTROUTING oifname $$WAN masquerade"
+
+# Fix 2: Policy route Tailscale client traffic into Mihomo TUN
+ExecStart=/bin/bash -c "{{ ip_binary }} rule show | grep -q 'from {{ tailscale_cidr }} lookup {{ mihomo_route_table }}' || {{ ip_binary }} rule add from {{ tailscale_cidr }} lookup {{ mihomo_route_table }} priority {{ tailscale_exitnode_rule_priority }}"
+
+# Cleanup on stop - find all masquerade handles on default-route iface and delete, tolerate missing
+ExecStop=/bin/bash -c "WAN=$$({{ ip_binary }} route show default | awk '/default/ {print $$5; exit}'); H=$$({{ nft_binary }} -a list chain ip nat POSTROUTING 2>/dev/null | grep \"oifname \\\"$$WAN\\\" masquerade\" | sed -n 's/.*# handle //p' | head -n1); [ -n \"$$H\" ] && {{ nft_binary }} delete rule ip nat POSTROUTING handle $$H || true"
+ExecStop=/bin/bash -c "{{ ip_binary }} rule show | grep -q 'from {{ tailscale_cidr }} lookup {{ mihomo_route_table }}' && {{ ip_binary }} rule del from {{ tailscale_cidr }} lookup {{ mihomo_route_table }} priority {{ tailscale_exitnode_rule_priority }} || true"
+
+[Install]
+WantedBy=multi-user.target

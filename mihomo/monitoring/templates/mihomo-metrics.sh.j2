@@ -1,0 +1,164 @@
+#!/bin/bash
+#
+# Mihomo Metrics Collector
+# Collects metrics from Mihomo REST API and pushes to VictoriaMetrics
+#
+
+set -uo pipefail
+
+# Configuration
+MIHOMO_API="${MIHOMO_API:-http://127.0.0.1:9090}"
+MIHOMO_SECRET="${MIHOMO_SECRET:-}"
+VICTORIAMETRICS_URL="${VICTORIAMETRICS_URL:-http://127.0.0.1:8428}"
+METRIC_PREFIX="${METRIC_PREFIX:-mihomo}"
+SERVER_LABEL="${SERVER_LABEL:-gtr}"
+
+: "${MIHOMO_SECRET:?MIHOMO_SECRET is required}"
+
+# Current timestamp for metric timestamps
+TIMESTAMP=$(date +%s)000
+
+# Temporary file for metrics
+METRICS_FILE=$(mktemp)
+trap "rm -f $METRICS_FILE" EXIT
+
+# Function to call Mihomo API (returns single JSON, handles SSE)
+mihomo_api() {
+    local endpoint="$1"
+    curl -s --max-time 3 "${MIHOMO_API}${endpoint}" \
+        -H "Authorization: Bearer ${MIHOMO_SECRET}" 2>/dev/null || echo "{}"
+}
+
+# Function to get last valid JSON from SSE stream
+mihomo_api_sse() {
+    local endpoint="$1"
+    curl -s --max-time 3 "${MIHOMO_API}${endpoint}" \
+        -H "Authorization: Bearer ${MIHOMO_SECRET}" 2>/dev/null | \
+        grep -E '^\{.*\}$' | tail -1 || echo '{"up":0,"down":0,"upTotal":0,"downTotal":0}'
+}
+
+# Function to write HELP and TYPE metadata
+write_metadata() {
+    local metric_name="$1"
+    local metric_type="$2"
+    local metric_help="$3"
+
+    echo "# HELP ${METRIC_PREFIX}_${metric_name} ${metric_help}" >> "$METRICS_FILE"
+    echo "# TYPE ${METRIC_PREFIX}_${metric_name} ${metric_type}" >> "$METRICS_FILE"
+}
+
+# Function to write a metric
+write_metric() {
+    local metric_name="$1"
+    local value="$2"
+    local labels="${3:-}"
+    local timestamp="${4:-$TIMESTAMP}"
+
+    if [ -n "$labels" ]; then
+        echo "${METRIC_PREFIX}_${metric_name}{${labels}} ${value} ${timestamp}" >> "$METRICS_FILE"
+    else
+        echo "${METRIC_PREFIX}_${metric_name} ${value} ${timestamp}" >> "$METRICS_FILE"
+    fi
+}
+
+# 1. Collect Traffic Metrics (from SSE stream)
+echo "Collecting traffic metrics..." >&2
+TRAFFIC_DATA=$(mihomo_api_sse "/traffic")
+
+if [ -n "$TRAFFIC_DATA" ]; then
+    write_metadata "traffic_upload_bytes" "gauge" "Current upload speed in bytes/s"
+    write_metadata "traffic_download_bytes" "gauge" "Current download speed in bytes/s"
+    write_metadata "traffic_upload_total_bytes" "counter" "Total upload bytes"
+    write_metadata "traffic_download_total_bytes" "counter" "Total download bytes"
+
+    UPLOAD=$(echo "$TRAFFIC_DATA" | jq -r '.up // 0' 2>/dev/null || echo "0")
+    DOWNLOAD=$(echo "$TRAFFIC_DATA" | jq -r '.down // 0' 2>/dev/null || echo "0")
+    UPLOAD_TOTAL=$(echo "$TRAFFIC_DATA" | jq -r '.upTotal // 0' 2>/dev/null || echo "0")
+    DOWNLOAD_TOTAL=$(echo "$TRAFFIC_DATA" | jq -r '.downTotal // 0' 2>/dev/null || echo "0")
+
+    write_metric "traffic_upload_bytes" "$UPLOAD" "server=\"${SERVER_LABEL}\""
+    write_metric "traffic_download_bytes" "$DOWNLOAD" "server=\"${SERVER_LABEL}\""
+    write_metric "traffic_upload_total_bytes" "$UPLOAD_TOTAL" "server=\"${SERVER_LABEL}\""
+    write_metric "traffic_download_total_bytes" "$DOWNLOAD_TOTAL" "server=\"${SERVER_LABEL}\""
+fi
+
+# 2. Collect Connection Metrics
+echo "Collecting connection metrics..." >&2
+CONNECTIONS_DATA=$(mihomo_api "/connections")
+
+if [ -n "$CONNECTIONS_DATA" ]; then
+    write_metadata "connections_active" "gauge" "Number of active connections"
+    write_metadata "memory_bytes" "gauge" "Memory usage in bytes"
+
+    ACTIVE_COUNT=$(echo "$CONNECTIONS_DATA" | jq -r '.connections | length // 0' 2>/dev/null || echo "0")
+    MEMORY_BYTES=$(echo "$CONNECTIONS_DATA" | jq -r '.memory // 0' 2>/dev/null || echo "0")
+
+    write_metric "connections_active" "$ACTIVE_COUNT" "server=\"${SERVER_LABEL}\""
+    write_metric "memory_bytes" "$MEMORY_BYTES" "server=\"${SERVER_LABEL}\""
+
+    # Also get total traffic from connections endpoint (more reliable)
+    CONN_UPLOAD_TOTAL=$(echo "$CONNECTIONS_DATA" | jq -r '.uploadTotal // 0' 2>/dev/null || echo "0")
+    CONN_DOWNLOAD_TOTAL=$(echo "$CONNECTIONS_DATA" | jq -r '.downloadTotal // 0' 2>/dev/null || echo "0")
+
+    write_metric "traffic_upload_total_bytes" "$CONN_UPLOAD_TOTAL" "server=\"${SERVER_LABEL}\",source=\"connections\""
+    write_metric "traffic_download_total_bytes" "$CONN_DOWNLOAD_TOTAL" "server=\"${SERVER_LABEL}\",source=\"connections\""
+fi
+
+# 3. Collect Proxy Status
+echo "Collecting proxy status..." >&2
+PROXIES_DATA=$(mihomo_api "/proxies")
+
+if [ -n "$PROXIES_DATA" ]; then
+    write_metadata "proxy_up" "gauge" "Proxy availability status (1=up, 0=down)"
+    write_metadata "proxy_selected" "gauge" "Whether proxy is currently selected (1=yes, 0=no)"
+    write_metadata "proxy_group_size" "gauge" "Number of proxies in group"
+
+    # Iterate through proxy groups
+    echo "$PROXIES_DATA" | jq -r '.proxies // {} | keys[]' 2>/dev/null | while read -r GROUP_NAME; do
+        if [ -n "$GROUP_NAME" ]; then
+            # Get group data
+            GROUP_NOW=$(echo "$PROXIES_DATA" | jq -r ".proxies[\"$GROUP_NAME\"].now // \"\"" 2>/dev/null)
+            GROUP_ALIVE=$(echo "$PROXIES_DATA" | jq -r ".proxies[\"$GROUP_NAME\"].alive // false" 2>/dev/null)
+            GROUP_TYPE=$(echo "$PROXIES_DATA" | jq -r ".proxies[\"$GROUP_NAME\"].type // \"unknown\"" 2>/dev/null)
+
+            # Group alive status
+            if [ "$GROUP_ALIVE" = "true" ]; then
+                write_metric "proxy_up" "1" "proxy_group=\"${GROUP_NAME}\",type=\"group\",server=\"${SERVER_LABEL}\""
+            else
+                write_metric "proxy_up" "0" "proxy_group=\"${GROUP_NAME}\",type=\"group\",server=\"${SERVER_LABEL}\""
+            fi
+
+            # Count proxies in group
+            GROUP_SIZE=$(echo "$PROXIES_DATA" | jq -r ".proxies[\"$GROUP_NAME\"].all | length" 2>/dev/null || echo "0")
+            write_metric "proxy_group_size" "$GROUP_SIZE" "proxy_group=\"${GROUP_NAME}\",server=\"${SERVER_LABEL}\""
+
+            # Mark selected proxy if any
+            if [ -n "$GROUP_NOW" ] && [ "$GROUP_NOW" != "null" ] && [ "$GROUP_NOW" != "" ]; then
+                write_metric "proxy_selected" "1" "proxy_group=\"${GROUP_NAME}\",proxy=\"${GROUP_NOW}\",server=\"${SERVER_LABEL}\""
+            fi
+        fi
+    done
+fi
+
+# 4. Scrape Info Metric
+write_metadata "scrape_success" "gauge" "Whether the metrics scrape was successful"
+write_metric "scrape_success" "1" "server=\"${SERVER_LABEL}\""
+
+# Push metrics to VictoriaMetrics
+echo "Pushing metrics to VictoriaMetrics..." >&2
+HTTP_CODE=$(curl -s -w "%{http_code}" -o /dev/null --max-time 5 -X POST \
+    "${VICTORIAMETRICS_URL}/api/v1/import/prometheus" \
+    -H "Content-Type: text/plain" \
+    --data-binary "@$METRICS_FILE" 2>/dev/null)
+
+if [ "$HTTP_CODE" = "204" ] || [ "$HTTP_CODE" = "200" ]; then
+    echo "Metrics pushed successfully (HTTP $HTTP_CODE)" >&2
+    exit 0
+else
+    echo "Failed to push metrics (HTTP $HTTP_CODE)" >&2
+    # Log failure metric
+    echo "${METRIC_PREFIX}_scrape_success{server=\"${SERVER_LABEL}\"} 0 $(date +%s)000" | \
+        curl -s --max-time 5 -X POST "${VICTORIAMETRICS_URL}/api/v1/import/prometheus" \
+        -H "Content-Type: text/plain" --data-binary @- 2>/dev/null
+    exit 1
+fi

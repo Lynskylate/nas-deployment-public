@@ -1,0 +1,71 @@
+---
+# Deploy Tailscale Exit Node + Mihomo TUN Routing Fix
+# Usage: ansible-playbook -i inventory.ini deploy-exitnode.yml
+
+- name: Deploy Tailscale Exit Node Fix to GTR
+  hosts: client_server
+  become: true
+
+  pre_tasks:
+    - name: Display deployment info
+      ansible.builtin.debug:
+        msg:
+          - "Target: {{ inventory_hostname }}"
+          - "WAN detection: dynamic (default route)"
+          - "Tailscale CIDR: {{ tailscale_cidr }}"
+          - "Mihomo route table: {{ mihomo_route_table }}"
+          - "Rule priority: {{ tailscale_exitnode_rule_priority }}"
+          - "DNS mode: {{ mihomo_enhanced_mode }}"
+          - "Monitor interval: {{ tailscale_exitnode_monitor_interval }}s"
+
+  roles:
+    - role: tailscale-exitnode
+
+  post_tasks:
+    - name: Verify tailscale-exitnode-fix service is active
+      ansible.builtin.systemd:
+        name: tailscale-exitnode-fix
+        state: started
+
+    - name: Display nftables NAT POSTROUTING chain
+      ansible.builtin.shell: |
+        {{ nft_binary }} list chain ip nat POSTROUTING
+      register: nft_output
+      changed_when: false
+
+    - name: Display ip rules
+      ansible.builtin.shell: |
+        {{ ip_binary }} rule show
+      register: iprule_output
+      changed_when: false
+
+    - name: Show applied rules
+      ansible.builtin.debug:
+        msg:
+          - "nftables POSTROUTING:"
+          - "{{ nft_output.stdout_lines }}"
+          - ""
+          - "ip rules:"
+          - "{{ iprule_output.stdout_lines }}"
+
+    - name: Verify monitor timer is active
+      ansible.builtin.systemd:
+        name: tailscale-exitnode-monitor.timer
+      register: monitor_timer
+      failed_when: false
+
+    - name: Show monitor status
+      ansible.builtin.debug:
+        msg:
+          - "Monitor timer: {{ monitor_timer.status.ActiveState | default('unknown') }}"
+          - "Monitor sub-state: {{ monitor_timer.status.SubState | default('unknown') }}"
+
+    - name: Verify systemd-resolved DNS is Mihomo
+      ansible.builtin.shell: |
+        resolvectl status | grep "DNS Servers" | head -1
+      register: dns_output
+      changed_when: false
+
+    - name: Show DNS config
+      ansible.builtin.debug:
+        msg: "{{ dns_output.stdout_lines }}"

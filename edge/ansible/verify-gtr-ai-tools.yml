@@ -1,0 +1,106 @@
+---
+- name: Verify AI coding tools and Slock daemon on GTR
+  hosts: gtr_core
+  become: true
+
+  tasks:
+    - name: Gather target AI user passwd entry
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ gtr_ai_user | default('lynskylate') }}"
+
+    - name: Set target AI user facts
+      ansible.builtin.set_fact:
+        verify_gtr_ai_user: "{{ gtr_ai_user | default('lynskylate') }}"
+        verify_gtr_ai_home: "/home/{{ gtr_ai_user | default('lynskylate') }}"
+        verify_gtr_ai_uid: "{{ ansible_facts.getent_passwd[gtr_ai_user | default('lynskylate')][1] }}"
+
+    - name: Verify CLI binaries
+      ansible.builtin.command: "{{ item }} --version"
+      loop:
+        - claude
+        - codex
+        - opencode
+      register: verify_gtr_ai_cli_versions
+      changed_when: false
+
+    - name: Verify config files exist
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ verify_gtr_ai_home }}/.claude/settings.json"
+        - "{{ verify_gtr_ai_home }}/.codex/config.toml"
+        - "{{ verify_gtr_ai_home }}/.codex/auth.json"
+        - "{{ verify_gtr_ai_home }}/.config/opencode/opencode.jsonc"
+      register: verify_gtr_ai_config_stats
+
+    - name: Assert config files exist
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+        fail_msg: "Missing config file: {{ item.item }}"
+        quiet: true
+      loop: "{{ verify_gtr_ai_config_stats.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Verify Slock user service is enabled
+      ansible.builtin.command: >
+        runuser -u {{ verify_gtr_ai_user }} -- env
+        HOME={{ verify_gtr_ai_home }}
+        XDG_RUNTIME_DIR=/run/user/{{ verify_gtr_ai_uid }}
+        systemctl --user is-enabled slock-ai-daemon.service
+      register: verify_slock_enabled
+      changed_when: false
+
+    - name: Verify Slock user service is active
+      ansible.builtin.command: >
+        runuser -u {{ verify_gtr_ai_user }} -- env
+        HOME={{ verify_gtr_ai_home }}
+        XDG_RUNTIME_DIR=/run/user/{{ verify_gtr_ai_uid }}
+        systemctl --user is-active slock-ai-daemon.service
+      register: verify_slock_active
+      changed_when: false
+
+    - name: Verify Slock API is reachable from GTR
+      ansible.builtin.command:
+        argv:
+          - curl
+          - -I
+          - -sS
+          - --max-time
+          - "15"
+          - https://api.slock.ai
+      register: verify_slock_api
+      changed_when: false
+
+    - name: Assert Slock API responds
+      ansible.builtin.assert:
+        that:
+          - "'HTTP/' in verify_slock_api.stdout"
+        fail_msg: "Slock API is not reachable from GTR"
+        quiet: true
+
+    - name: Inspect recent Slock daemon journal
+      ansible.builtin.command: >
+        runuser -u {{ verify_gtr_ai_user }} -- env
+        HOME={{ verify_gtr_ai_home }}
+        XDG_RUNTIME_DIR=/run/user/{{ verify_gtr_ai_uid }}
+        journalctl --user-unit=slock-ai-daemon.service -n 20 --no-pager
+      register: verify_slock_journal
+      changed_when: false
+
+    - name: Assert Slock daemon has recent server activity
+      ansible.builtin.assert:
+        that:
+          - "'Received ping' in verify_slock_journal.stdout or 'Connected to server' in verify_slock_journal.stdout"
+        fail_msg: "Slock daemon is active but not exchanging recent heartbeats with the server"
+        quiet: true
+
+    - name: Display verification summary
+      ansible.builtin.debug:
+        msg:
+          - "CLI versions: {{ verify_gtr_ai_cli_versions.results | map(attribute='stdout') | list }}"
+          - "Slock enabled: {{ verify_slock_enabled.stdout }}"
+          - "Slock active: {{ verify_slock_active.stdout }}"
+          - "Slock API reachable: {{ 'HTTP/' in verify_slock_api.stdout }}"

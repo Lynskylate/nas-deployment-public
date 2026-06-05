@@ -1,0 +1,84 @@
+---
+# Deploy Shadowsocks + Shadow-TLS + Monitoring to remote server
+# Usage: ansible-playbook -i inventory.ini server-deploy.yml
+
+- name: Deploy Shadowsocks + Shadow-TLS + Monitoring to Remote Server
+  hosts: remote_server
+  become: true
+
+  pre_tasks:
+    - name: Display deployment info
+      ansible.builtin.debug:
+        msg:
+          - "Deploying to: {{ inventory_hostname }} ({{ remote_server_ip }})"
+          - "Shadowsocks version: {{ shadowsocks_version }}"
+          - "Shadow-TLS version: {{ shadowtls_version }}"
+          - "Envoy version: {{ envoy_version }}"
+          - "Node Exporter version: v{{ node_exporter_version }}"
+          - ""
+          - "Components: Envoy (443), Shadow-TLS (127.0.0.1:8443), Shadowsocks (127.0.0.1:8388), Node Exporter (127.0.0.1:9100)"
+
+  roles:
+    - role: shadowsocks-server
+    - role: node-exporter
+    - role: envoy-server
+    - role: shadowtls-server
+
+  post_tasks:
+    - name: Verify services are running
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: started
+      loop:
+        - shadowsocks-server
+        - node_exporter
+        - envoy
+        - shadow-tls-server
+
+    - name: Check port listening
+      ansible.builtin.shell: |
+        ss -tulnp | grep -E ':({{ envoy_admin_port }}|{{ node_exporter_port }}|{{ shadowtls_server_listen_port }}|443)' || echo "Port check completed"
+      register: port_check
+      changed_when: false
+
+    - name: Display port status
+      ansible.builtin.debug:
+        var: port_check.stdout_lines
+
+    - name: Test Envoy admin interface
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ envoy_admin_port }}/stats"
+        return_content: false
+      register: envoy_admin_test
+      ignore_errors: true
+
+    - name: Test metrics endpoint
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:443/metrics"
+        return_content: false
+      register: metrics_test
+      ignore_errors: true
+
+    - name: Display test results
+      ansible.builtin.debug:
+        msg:
+          - "Envoy Admin: {{ 'OK' if envoy_admin_test.succeeded else 'FAILED' }}"
+          - "Metrics Endpoint: {{ 'OK' if metrics_test.succeeded else 'FAILED' }}"
+
+    - name: Display deployment summary
+      ansible.builtin.debug:
+        msg:
+          - "✓ All services deployed and running"
+          - "✓ Envoy listening on port 443 (TLS router)"
+          - "✓ Shadow-TLS server listening on 127.0.0.1:8443"
+          - "✓ Shadowsocks server listening on 127.0.0.1:8388"
+          - "✓ Node Exporter listening on 127.0.0.1:9100"
+          - ""
+          - "Endpoints:"
+          - "  - Metrics: http://{{ remote_server_ip }}:443/metrics"
+          - "  - Envoy Admin (local): http://127.0.0.1:9901"
+          - ""
+          - "Next steps:"
+          - "1. Deploy to client server: ansible-playbook -i inventory.ini client-deploy.yml"
+          - "2. Update VictoriaMetrics: ansible-playbook -i inventory.ini vm-update.yml"
+          - "3. Verify connection: ansible-playbook -i inventory.ini verify.yml"

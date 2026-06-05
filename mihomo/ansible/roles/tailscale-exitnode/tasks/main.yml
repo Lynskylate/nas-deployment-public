@@ -1,0 +1,218 @@
+---
+# Tailscale Exit Node + Mihomo TUN Routing Fix
+
+- name: Verify prerequisites
+  ansible.builtin.assert:
+    that:
+      - mihomo_route_table is defined
+      - tailscale_cidr is defined
+    fail_msg: Required variables not defined. Check group_vars/all/public.yml and secret.runtime.yml
+
+- name: Check if nft binary exists
+  ansible.builtin.stat:
+    path: "{{ nft_binary }}"
+  register: nft_stat
+
+- name: Fail if nft is not available
+  ansible.builtin.fail:
+    msg: "nft binary not found at {{ nft_binary }}"
+  when: not nft_stat.stat.exists
+
+- name: Check if Tailscale is running
+  ansible.builtin.systemd:
+    name: tailscaled
+  register: tailscaled_status
+  failed_when: false
+
+- name: Check if Mihomo is running
+  ansible.builtin.systemd:
+    name: mihomo
+  register: mihomo_status
+  failed_when: false
+
+- name: Display prerequisite status
+  ansible.builtin.debug:
+    msg:
+      - "tailscaled: {{ tailscaled_status.status.ActiveState | default(unknown) }}"
+      - "mihomo: {{ mihomo_status.status.ActiveState | default(unknown) }}"
+
+- name: Deploy tailscale-exitnode-fix systemd service
+  ansible.builtin.template:
+    src: tailscale-exitnode-fix.service.j2
+    dest: /etc/systemd/system/tailscale-exitnode-fix.service
+    mode: '0644'
+    owner: root
+    group: root
+  notify:
+    - reload systemd
+    - restart tailscale-exitnode-fix
+
+- name: Apply tailscale-exitnode-fix service changes
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable tailscale-exitnode-fix service
+  ansible.builtin.systemd:
+    name: tailscale-exitnode-fix
+    enabled: true
+    daemon_reload: true
+
+- name: Restart tailscale-exitnode-fix service to apply idempotent rules
+  ansible.builtin.systemd:
+    name: tailscale-exitnode-fix
+    state: restarted
+
+- name: Verify MASQUERADE rule is active
+  ansible.builtin.shell: |
+    {{ nft_binary }} list chain ip nat POSTROUTING 2>/dev/null | grep -q masquerade
+  register: masq_check
+  changed_when: false
+  failed_when: masq_check.rc != 0
+
+- name: Verify policy routing rule is active
+  ansible.builtin.shell: |
+    {{ ip_binary }} rule show | grep -q 'from {{ tailscale_cidr }} lookup {{ mihomo_route_table }}'
+  register: rule_check
+  changed_when: false
+  failed_when: rule_check.rc != 0
+
+- name: Create resolved.conf.d directory
+  ansible.builtin.file:
+    path: /etc/systemd/resolved.conf.d
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: Deploy systemd-resolved Mihomo DNS config
+  ansible.builtin.template:
+    src: mihomo-dns.conf.j2
+    dest: /etc/systemd/resolved.conf.d/mihomo-dns.conf
+    mode: '0644'
+    owner: root
+    group: root
+  notify:
+    - restart systemd-resolved
+
+# --- Monitoring: Monitor script with auto-fix + Prometheus metrics ---
+
+- name: Create textfile collector directory
+  ansible.builtin.file:
+    path: "{{ tailscale_exitnode_textfile_dir }}"
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: Deploy exit node monitor script (check + auto-fix)
+  ansible.builtin.template:
+    src: tailscale-exitnode-monitor.sh.j2
+    dest: "{{ tailscale_exitnode_script_dir }}/tailscale-exitnode-monitor.sh"
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: Deploy exit node diagnostic check script
+  ansible.builtin.template:
+    src: tailscale-exitnode-check.sh.j2
+    dest: "{{ tailscale_exitnode_script_dir }}/tailscale-exitnode-check.sh"
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: Deploy monitor systemd service
+  ansible.builtin.template:
+    src: tailscale-exitnode-monitor.service.j2
+    dest: /etc/systemd/system/tailscale-exitnode-monitor.service
+    mode: '0644'
+    owner: root
+    group: root
+
+- name: Deploy monitor systemd timer
+  ansible.builtin.template:
+    src: tailscale-exitnode-monitor.timer.j2
+    dest: /etc/systemd/system/tailscale-exitnode-monitor.timer
+    mode: '0644'
+    owner: root
+    group: root
+  notify:
+    - reload systemd
+
+- name: Enable and start monitor timer
+  ansible.builtin.systemd:
+    name: tailscale-exitnode-monitor.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+
+# --- Cleanup: Remove old check service/timer (replaced by monitor) ---
+
+- name: Stop and disable old check timer
+  ansible.builtin.systemd:
+    name: tailscale-exitnode-check.timer
+    enabled: false
+    state: stopped
+  failed_when: false
+
+- name: Stop and disable old check service
+  ansible.builtin.systemd:
+    name: tailscale-exitnode-check.service
+    state: stopped
+  failed_when: false
+
+- name: Remove old check service file
+  ansible.builtin.file:
+    path: /etc/systemd/system/tailscale-exitnode-check.service
+    state: absent
+  notify: reload systemd
+
+- name: Remove old check timer file
+  ansible.builtin.file:
+    path: /etc/systemd/system/tailscale-exitnode-check.timer
+    state: absent
+  notify: reload systemd
+
+- name: Create node_exporter systemd drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/node_exporter.service.d
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: Deploy node_exporter textfile collector drop-in
+  ansible.builtin.template:
+    src: node_exporter-textfile.conf.j2
+    dest: /etc/systemd/system/node_exporter.service.d/textfile.conf
+    mode: '0644'
+    owner: root
+    group: root
+
+- name: Restart node_exporter to enable textfile collector
+  ansible.builtin.systemd:
+    name: node_exporter
+    state: restarted
+    daemon_reload: true
+
+- name: Wait for monitor to generate initial metrics
+  ansible.builtin.pause:
+    seconds: 5
+
+- name: Verify textfile collector is working
+  ansible.builtin.command:
+    cmd: "cat {{ tailscale_exitnode_textfile_dir }}/tailscale_exitnode.prom"
+  register: textfile_verify
+  changed_when: false
+  failed_when: textfile_verify.rc != 0
+  ignore_errors: true
+
+- name: Display deployment result
+  ansible.builtin.debug:
+    msg:
+      - "tailscale-exitnode-fix deployed and active"
+      - "MASQUERADE: dynamic WAN detection (default route)"
+      - "Policy route: from {{ tailscale_cidr }} lookup {{ mihomo_route_table }} priority {{ tailscale_exitnode_rule_priority }}"
+      - "DNS mode: {{ mihomo_enhanced_mode }}"
+      - "System DNS: {{ mihomo_dns_listen | regex_replace(':.*', '') }} (Mihomo)"
+      - "Monitor timer: tailscale-exitnode-monitor.timer ({{ tailscale_exitnode_monitor_interval }}s)"
+      - "Auto-fix: enabled (MASQUERADE + ip rule)"
+      - "Textfile collector: {{ tailscale_exitnode_textfile_dir }}/tailscale_exitnode.prom"

@@ -1,0 +1,207 @@
+---
+# Mihomo Integration for Monitoring
+# Adds metrics (VictoriaMetrics) and logs (VictoriaLogs) support
+
+# ============================================================
+# Part 1: Enable Mihomo Prometheus Metrics
+# ============================================================
+# Add this to /etc/mihomo/config.yaml:
+
+# metrics:
+#   - name: mihomo_metrics
+#     port: 9091
+#     path: /metrics
+#     # Or use external-controller metrics
+#   # Mihomo v1.18+ supports metrics via external-controller
+#   # Just add: external-controller: 0.0.0.0:9090
+#   # Then access: http://127.0.0.1:9090/metrics
+
+# ============================================================
+# Part 2: Add to VictoriaMetrics Scrape Config
+# ============================================================
+# Add to /usr/local/victoriametrics/victoriametrics_sd.yaml:
+
+scrape_configs:
+  # ... existing configs ...
+
+  - job_name: 'mihomo'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['127.0.0.1:9090']
+        labels:
+          service: 'mihomo'
+          server: 'gtr'
+          env: 'production'
+    metrics_path: /metrics
+    # Optional: Basic auth if external-controller has secret
+    # basic_auth:
+    #   username: ''  # Leave empty, use Authorization header
+    #   password: '<render-from-private-vault>'
+    # Or use params for secret
+    params:
+      _: ['<render-from-private-vault>']
+
+# ============================================================
+# Part 3: Forward Mihomo Logs to VictoriaLogs
+# ============================================================
+# Method A: Using systemd journal + vector (recommended)
+
+# 1. Create vector config for mihomo logs: /etc/vector/mihomo.yaml
+
+# sources:
+#   mihomo_journal:
+#     type: systemd_journal
+#     units:
+#       - mihomo.service
+#
+# transforms:
+#   mihomo_parse:
+#     inputs:
+#       - mihomo_journal
+#     type: remap
+#     source: |
+#       # Parse mihomo log format
+#       .timestamp = parse_timestamp(.timestamp, "%Y-%m-%dT%H:%M:%S%.fZ") ?? now()
+#       .log_level = upcase(string(.PRIORITY ?? "info"))
+#       .service = "mihomo"
+#       .server = "gtr"
+#       .env = "production"
+#
+# sinks:
+#   victorialogs:
+#     type: http
+#     inputs:
+#       - mihomo_parse
+#     uri: http://127.0.0.1:8429/insert/jsonline/200
+#     method: post
+#     encoding:
+#       codec: json
+#     compression: gzip
+#     batch:
+#       max_bytes: 1048576
+#       timeout_secs: 5
+#
+# # Alternative: File-based
+# # sources:
+# #   mihomo_file:
+# #     type: file
+# #     include:
+# #       - /var/log/mihomo/*.log
+#
+# # sinks:
+# #   victorialogs_file:
+# #     type: http
+# #     inputs:
+# #       - mihomo_file
+# #     uri: http://127.0.0.1:8429/insert/jsonline/200
+# #     method: post
+
+# ============================================================
+# Part 4: Grafana Dashboard for Mihomo
+# ============================================================
+# Import dashboard JSON to visualize metrics
+
+# Example queries for Grafana:
+# 1. Connections by proxy:
+#    sum(clash_connections{proxy_group=~"$group"}) by (proxy)
+#
+# 2. Traffic by proxy:
+#    sum(rate(clash_traffic_upload[5m])) by (proxy)
+#
+# 3. Request success rate:
+#    sum(rate(clash_requests[5m])) by (proxy)
+#
+# 4. Connection duration:
+#    histogram_quantile(0.95, clash_connection_duration_seconds_bucket)
+
+# ============================================================
+# Part 5: Alternative - Script-based Push (if needed)
+# ============================================================
+# If VictoriaMetrics cannot scrape mihomo directly, use a cron job
+
+#!/bin/bash
+# /usr/local/bin/mihomo-metrics.sh
+
+MIHOMO_API="http://127.0.0.1:9090"
+VM_URL="http://127.0.0.1:8428/api/v1/import/prometheus"
+SECRET="<render-from-private-vault>"
+
+# Get metrics from mihomo
+METRICS=$(curl -s "${MIHOMO_API}/metrics?${SECRET}")
+
+# Push to VictoriaMetrics
+echo "$METRICS" | curl -X POST "$VM_URL" --data-binary @-
+
+# Get additional stats from API and convert to metrics
+CONNECTIONS=$(curl -s -H "Authorization: Bearer $SECRET" "${MIHOMO_API}/connections" | jq -r '
+  [.connections[] | {
+    name: .metadata.host,
+    remote: .metadata.destinationPort,
+    proxy: .metadata.network
+  }] | length
+')
+
+# Create custom metric
+echo "mihomo_active_connections{server=\"gtr\"} $CONNECTIONS $(date +%s)000" | \
+  curl -X POST "$VM_URL" --data-binary @-
+
+# ============================================================
+# Part 6: Systemd service for metrics pusher (alternative)
+# ============================================================
+# /etc/systemd/system/mihomo-metrics.service
+
+[Unit]
+Description=Mihomo Metrics Pusher to VictoriaMetrics
+After=mihomo.service victoriametrics.service
+Requires=mihomo.service
+
+[Service]
+Type=simple
+User= nobody
+ExecStart=/usr/local/bin/mihomo-metrics.sh
+Restart=always
+RestartSec=60s
+
+[Install]
+WantedBy=multi-user.target
+
+# ============================================================
+# Part 7: Ansible Role Structure
+# ============================================================
+# Create: ansible-gtr-backup/roles/mihomo-monitoring/
+#
+# ├── tasks/
+# │   └── main.yml
+# ├── templates/
+# │   ├── mihomo-metrics.service.j2
+# │   ├── mihomo-metrics.sh.j2
+# │   └── vector-mihomo.yaml.j2
+# └── vars/
+#     └── main.yml
+
+# ============================================================
+# Implementation Steps
+# ============================================================
+#
+# 1. Enable metrics in mihomo config:
+#    ssh root@192.168.31.59 'vi /etc/mihomo/config.yaml'
+#    Add to external-controller section (already has metrics support)
+#
+# 2. Add mihomo to VictoriaMetrics scrape config:
+#    ssh root@192.168.31.59 'vi /usr/local/victoriametrics/victoriametrics_sd.yaml'
+#
+# 3. Restart VictoriaMetrics:
+#    ssh root@192.168.31.59 'systemctl restart victoriametrics'
+#
+# 4. Verify metrics are being scraped:
+#    curl -s 'http://127.0.0.1:8428/api/v1/query?query=up{job="mihomo"}' | jq .
+#
+# 5. For logs, create vector config:
+#    ssh root@192.168.31.59 'cat > /etc/vector/mihomo.yaml'
+#
+# 6. Restart vector:
+#    ssh root@192.168.31.59 'systemctl restart vector'
+#
+# 7. Query logs in VictoriaLogs:
+#    curl -G http://127.0.0.1:8429/select/log/sql/query \
+#      --data-urlencode 'query=SELECT * FROM "mihomo_logs" LIMIT 20'

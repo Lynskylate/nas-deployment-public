@@ -1,0 +1,10 @@
+---
+- name: reload envoy
+  ansible.builtin.systemd:
+    name: envoy
+    state: reloaded
+
+- name: restart envoy
+  ansible.builtin.systemd:
+    name: envoy
+    state: restarted

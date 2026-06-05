@@ -1,0 +1,57 @@
+---
+# Deploy VictoriaTraces to GTR Server
+# Usage: ansible-playbook -i inventory.ini deploy.yml
+
+- name: Deploy VictoriaTraces to GTR Server
+  hosts: gtr
+  become: true
+
+  pre_tasks:
+    - name: Display deployment info
+      ansible.builtin.debug:
+        msg:
+          - "Deploying VictoriaTraces {{ victoriatraces_version }} to: {{ inventory_hostname }}"
+          - "HTTP Port: {{ victoriatraces_http_port }}"
+          - "Data Path: {{ victoriatraces_data_path }}"
+
+  roles:
+    - role: victoriatraces
+
+  post_tasks:
+    - name: Verify victoriatraces service is running
+      ansible.builtin.systemd:
+        name: victoriatraces
+        state: started
+
+    - name: Check victoriatraces port listening
+      ansible.builtin.shell: |
+        ss -tulnp | grep ':{{ victoriatraces_http_port }}' || echo "Port check completed"
+      register: port_check
+      changed_when: false
+
+    - name: Display port status
+      ansible.builtin.debug:
+        var: port_check.stdout_lines
+
+    - name: Test victoriatraces health endpoint
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ victoriatraces_http_port }}/health"
+        return_content: true
+      register: health_test
+      ignore_errors: true
+
+    - name: Display deployment summary
+      ansible.builtin.debug:
+        msg:
+          - "VictoriaTraces deployed and running"
+          - ""
+          - "Endpoints:"
+          - "  - VMUI:          http://{{ inventory_hostname }}:{{ victoriatraces_http_port }}/vmui"
+          - "  - Health:        http://{{ inventory_hostname }}:{{ victoriatraces_http_port }}/health"
+          - "  - Metrics:       http://{{ inventory_hostname }}:{{ victoriatraces_http_port }}/metrics"
+          - ""
+          - "Data Ingestion:"
+          - "  - OTLP/HTTP:     http://{{ inventory_hostname }}:{{ victoriatraces_http_port }}/insert/opentelemetry/v1/traces"
+          - ""
+          - "Grafana Integration:"
+          - "  - Jaeger API:    http://{{ inventory_hostname }}:{{ victoriatraces_http_port }}/select/jaeger"

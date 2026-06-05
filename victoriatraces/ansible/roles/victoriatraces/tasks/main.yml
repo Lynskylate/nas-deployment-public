@@ -1,0 +1,84 @@
+---
+# VictoriaTraces Installation and Configuration
+
+- name: Create victoriatraces group
+  ansible.builtin.group:
+    name: "{{ victoriatraces_group }}"
+    system: true
+    state: present
+
+- name: Create victoriatraces user
+  ansible.builtin.user:
+    name: "{{ victoriatraces_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+    group: "{{ victoriatraces_group }}"
+    state: present
+
+- name: Create victoriatraces directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ victoriatraces_user }}"
+    group: "{{ victoriatraces_group }}"
+    mode: '0750'
+  loop:
+    - "{{ victoriatraces_bin_path }}"
+    - "{{ victoriatraces_data_path }}"
+
+- name: Check if victoriatraces binary exists
+  ansible.builtin.stat:
+    path: "{{ victoriatraces_bin_path }}/victoria-traces-prod"
+  register: victoriatraces_binary
+
+- name: Download VictoriaTraces
+  ansible.builtin.get_url:
+    url: "{{ victoriatraces_download_url }}/victoria-traces-linux-amd64-v{{ victoriatraces_version }}.tar.gz"
+    dest: /tmp/victoria-traces.tar.gz
+    mode: '0644'
+    timeout: 300
+  environment:
+    http_proxy: http://127.0.0.1:7890
+    https_proxy: http://127.0.0.1:7890
+  register: download_result
+  until: download_result is succeeded
+  retries: 5
+  delay: 10
+  when: not victoriatraces_binary.stat.exists
+
+- name: Extract VictoriaTraces binary
+  ansible.builtin.shell: |
+    tar -xzf /tmp/victoria-traces.tar.gz -C {{ victoriatraces_bin_path }}/
+  args:
+    creates: "{{ victoriatraces_bin_path }}/victoria-traces-prod"
+  when: not victoriatraces_binary.stat.exists
+  notify: restart victoriatraces
+
+- name: Set binary permissions
+  ansible.builtin.file:
+    path: "{{ victoriatraces_bin_path }}/victoria-traces-prod"
+    owner: "{{ victoriatraces_user }}"
+    group: "{{ victoriatraces_group }}"
+    mode: '0755'
+
+- name: Deploy systemd service file
+  ansible.builtin.template:
+    src: victoriatraces.service.j2
+    dest: /etc/systemd/system/victoriatraces.service
+    mode: '0644'
+  notify:
+    - reload systemd
+    - restart victoriatraces
+
+- name: Enable victoriatraces service
+  ansible.builtin.systemd:
+    name: victoriatraces
+    enabled: true
+    daemon_reload: true
+
+- name: Cleanup temp files
+  ansible.builtin.file:
+    path: /tmp/victoria-traces.tar.gz
+    state: absent
+  ignore_errors: true

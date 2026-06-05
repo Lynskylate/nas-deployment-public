@@ -1,0 +1,70 @@
+name: Validate PR
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install validation dependencies
+        run: |
+          python3 -m pip install --user ansible pyyaml
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Plaintext secret guard
+        run: python3 scripts/check-no-plaintext-secrets.py
+
+      - name: Ansible syntax check
+        run: |
+          cd edge/ansible
+          ansible-playbook -i inventory-edge.ini deploy-edge.yml --syntax-check
+          ansible-playbook -i inventory-edge.ini deploy-resource-manifest.yml --syntax-check
+          ansible-playbook -i inventory-edge.ini deploy-gtr-k3s-platform.yml --syntax-check
+          ansible-playbook -i inventory-edge.ini verify-gtr-k3s-platform.yml --syntax-check
+          ansible-playbook -i inventory-edge.ini deploy-gtr-ai-tools.yml --syntax-check
+          ansible-playbook -i inventory-edge.ini deploy-gtr-tunnel-client.yml --syntax-check
+          ansible-playbook -i inventory-edge.ini deploy-edge-tunnel-server.yml --syntax-check
+          cd ../../mihomo/ansible
+          ansible-playbook -i inventory.ini deploy.yml --syntax-check
+          ansible-playbook -i inventory.ini deploy-docker.yml --syntax-check
+          ansible-playbook -i inventory.ini deploy-exitnode.yml --syntax-check
+          ansible-playbook -i inventory.ini verify.yml --syntax-check
+          ansible-playbook -i inventory.ini verify-exitnode.yml --syntax-check
+          ansible-playbook -i inventory-aliyun.ini deploy-aliyun.yml --syntax-check
+          ansible-playbook -i inventory-aliyun.ini verify-aliyun.yml --syntax-check
+          cd ../../shadowsocks-shadowtls/ansible
+          ansible-playbook -i inventory.ini server-deploy.yml --syntax-check
+          ansible-playbook -i inventory.ini client-deploy.yml --syntax-check
+          ansible-playbook -i inventory.ini verify.yml --syntax-check
+          ansible-playbook -i inventory.ini vm-update.yml --syntax-check
+          ansible-playbook -i inventory.ini latency-report.yml --syntax-check
+          cd ../../network-monitor/ansible
+          ansible-playbook -i inventory.ini deploy.yml --syntax-check
+
+  validate-manifest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check manifest format
+        run: |
+          python3 -m pip install --user pyyaml
+          python3 - <<'PY'
+          import yaml
+
+          manifest = yaml.safe_load(open(".resource-manifest.yml", encoding="utf-8"))
+          assert manifest.get("schema_version") == 1, "schema_version must be 1"
+          assert manifest.get("layer") == "infrastructure", "layer must be infrastructure"
+          print("Manifest format OK")
+          print("  subuid:", len(manifest.get("subuid", [])), "entries")
+          print("  ports:", len(manifest.get("ports", [])), "entries")
+          PY

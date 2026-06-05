@@ -1,0 +1,16 @@
+---
+# Handlers for Mihomo Service
+
+- name: reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: restart mihomo
+  ansible.builtin.systemd:
+    name: mihomo
+    state: restarted
+
+- name: restart vector
+  ansible.builtin.systemd:
+    name: vector
+    state: restarted

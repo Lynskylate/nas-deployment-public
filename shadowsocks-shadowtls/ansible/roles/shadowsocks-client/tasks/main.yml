@@ -1,0 +1,99 @@
+---
+# Shadowsocks Client Role
+
+- name: Create shadowsocks user
+  ansible.builtin.user:
+    name: shadowsocks
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+    state: present
+
+- name: Create data directory
+  ansible.builtin.file:
+    path: /var/lib/shadowsocks
+    state: directory
+    owner: shadowsocks
+    group: shadowsocks
+    mode: '0750'
+
+- name: Check if shadowsocks binary exists
+  ansible.builtin.stat:
+    path: "{{ ss_client_bin_path }}/sslocal"
+  register: ss_binary
+
+- name: Download shadowsocks-rust
+  ansible.builtin.get_url:
+    url: "{{ shadowsocks_download_url }}/{{ shadowsocks_version }}/shadowsocks-{{ shadowsocks_version }}.x86_64-unknown-linux-gnu.tar.xz"
+    dest: /tmp/shadowsocks.tar.xz
+    mode: '0644'
+    timeout: 300
+  environment: "{{ {'http_proxy': github_download_proxy, 'https_proxy': github_download_proxy} if (github_download_proxy | default('') | length > 0) else {} }}"
+  register: download_result
+  until: download_result is succeeded
+  retries: 5
+  delay: 10
+  when: not ss_binary.stat.exists
+
+- name: Extract shadowsocks archive
+  ansible.builtin.unarchive:
+    src: /tmp/shadowsocks.tar.xz
+    dest: /tmp
+    remote_src: true
+  when: not ss_binary.stat.exists
+
+- name: Create installation directory
+  ansible.builtin.file:
+    path: "{{ ss_client_bin_path }}"
+    state: directory
+    mode: '0755'
+  when: not ss_binary.stat.exists
+
+- name: Install sslocal binary
+  ansible.builtin.copy:
+    src: /tmp/sslocal
+    dest: "{{ ss_client_bin_path }}/sslocal"
+    mode: '0755'
+    remote_src: true
+  when: not ss_binary.stat.exists
+  notify: restart shadowsocks-client
+
+- name: Create config directory
+  ansible.builtin.file:
+    path: /etc/shadowsocks
+    state: directory
+    mode: '0755'
+
+- name: Deploy shadowsocks client config
+  ansible.builtin.template:
+    src: client-config.json.j2
+    dest: /etc/shadowsocks/client.json
+    mode: '0640'
+    owner: shadowsocks
+    group: shadowsocks
+  notify: restart shadowsocks-client
+
+- name: Deploy systemd service file
+  ansible.builtin.template:
+    src: shadowsocks-client.service.j2
+    dest: /etc/systemd/system/shadowsocks-client.service
+    mode: '0644'
+  notify:
+    - reload systemd
+    - restart shadowsocks-client
+
+- name: Enable shadowsocks-client (started by dependency order)
+  ansible.builtin.systemd:
+    name: shadowsocks-client
+    enabled: true
+    daemon_reload: true
+
+- name: Cleanup temp files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /tmp/shadowsocks.tar.xz
+    - /tmp/sslocal
+    - /tmp/ssserver
+  ignore_errors: true

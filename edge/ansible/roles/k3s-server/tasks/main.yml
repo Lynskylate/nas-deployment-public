@@ -1,0 +1,94 @@
+---
+- name: Assert K3s server token is provided
+  ansible.builtin.assert:
+    that:
+      - k3s_cluster_token is defined
+      - k3s_cluster_token | length > 0
+    fail_msg: "k3s_cluster_token must be provided before deploying the K3s server"
+  no_log: true
+
+- name: Read server Tailscale IPv4 address
+  ansible.builtin.command: tailscale ip -4
+  register: k3s_server_tailscale_ip_cmd
+  changed_when: false
+
+- name: Derive effective K3s server endpoint IP
+  ansible.builtin.set_fact:
+    k3s_server_effective_ip: "{{ k3s_server_tailscale_ip | default(k3s_server_tailscale_ip_cmd.stdout_lines[0], true) }}"
+    k3s_server_effective_tls_sans: "{{ ((k3s_server_tls_sans | default([])) + [inventory_hostname, ansible_host, (k3s_server_tailscale_ip | default(k3s_server_tailscale_ip_cmd.stdout_lines[0], true))]) | unique }}"
+
+- name: Ensure K3s server config directory exists
+  ansible.builtin.file:
+    path: "{{ k3s_server_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Render K3s server config
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: "{{ k3s_server_config_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+  notify: restart k3s server
+
+- name: Download K3s installer
+  ansible.builtin.get_url:
+    url: "{{ k3s_install_script_url }}"
+    dest: "{{ k3s_install_script_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+  environment: "{{ {'http_proxy': github_download_proxy, 'https_proxy': github_download_proxy} if (github_download_proxy | default('') | length > 0) else {} }}"
+
+- name: Check if K3s binary exists
+  ansible.builtin.stat:
+    path: /usr/local/bin/k3s
+  register: k3s_server_binary
+
+- name: Check if K3s server service exists
+  ansible.builtin.stat:
+    path: "{{ k3s_server_service_path }}"
+  register: k3s_server_service
+
+- name: Install K3s server
+  ansible.builtin.shell: |
+    set -euo pipefail
+    INSTALL_K3S_CHANNEL="{{ k3s_channel }}" \
+    INSTALL_K3S_EXEC="server" \
+    sh "{{ k3s_install_script_path }}"
+  args:
+    executable: /bin/bash
+  environment: "{{ {'http_proxy': github_download_proxy, 'https_proxy': github_download_proxy} if (github_download_proxy | default('') | length > 0) else {} }}"
+  when: not k3s_server_binary.stat.exists or not k3s_server_service.stat.exists
+
+- name: Flush K3s server handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure K3s server is enabled and started
+  ansible.builtin.systemd:
+    name: "{{ k3s_server_service_name }}"
+    daemon_reload: true
+    enabled: true
+    state: started
+
+- name: Wait for K3s API server
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 6443
+    timeout: 90
+
+- name: Read K3s server nodes
+  ansible.builtin.command: k3s kubectl get nodes --no-headers
+  register: k3s_server_nodes
+  changed_when: false
+
+- name: Show K3s server deployment summary
+  ansible.builtin.debug:
+    msg:
+      - "k3s_server_ip={{ k3s_server_effective_ip }}"
+      - "cluster_cidr={{ k3s_cluster_cidr }}"
+      - "service_cidr={{ k3s_service_cidr }}"
+      - "nodes={{ k3s_server_nodes.stdout_lines }}"

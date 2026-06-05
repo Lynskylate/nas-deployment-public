@@ -1,0 +1,17 @@
+[Unit]
+Description=Mihomo Metrics Collector Timer
+Documentation=https://github.com/MetaCubeX/mihomo-meta
+Requires=mihomo-metrics.service
+After=network-online.target
+
+[Timer]
+# Run every 15 seconds
+OnBootSec=30s
+OnUnitActiveSec=15s
+AccuracySec=1s
+
+# Randomize start time slightly to avoid thundering herd
+RandomizedDelaySec=1
+
+[Install]
+WantedBy=timers.target

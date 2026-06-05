@@ -1,0 +1,76 @@
+---
+- name: Build SAN entries for {{ tls_cert.name }}
+  ansible.builtin.set_fact:
+    tls_san_entries: >-
+      {{
+        ((tls_cert.san_dns | default([tls_cert.common_name])) | map('regex_replace', '^(.*)$', 'DNS:\1') | list)
+        +
+        ((tls_cert.san_ip | default([])) | map('regex_replace', '^(.*)$', 'IP:\1') | list)
+      }}
+
+- name: Create extension file for {{ tls_cert.name }}
+  ansible.builtin.copy:
+    dest: "{{ edge_ca_local_issued_dir }}/{{ inventory_hostname }}/{{ tls_cert.name }}.ext"
+    content: |
+      [ v3_req ]
+      basicConstraints = CA:FALSE
+      keyUsage = digitalSignature, keyEncipherment
+      extendedKeyUsage = serverAuth
+      subjectAltName = {{ tls_san_entries | join(',') }}
+    mode: "0644"
+  delegate_to: localhost
+  become: false
+
+- name: Generate private key for {{ tls_cert.name }}
+  ansible.builtin.command:
+    cmd: >-
+      openssl genrsa -out {{ edge_ca_local_issued_dir }}/{{ inventory_hostname }}/{{ tls_cert.name }}.key
+      {{ tls_cert.key_bits | default(2048) }}
+    creates: "{{ edge_ca_local_issued_dir }}/{{ inventory_hostname }}/{{ tls_cert.name }}.key"
+  delegate_to: localhost
+  become: false
+
+- name: Generate CSR for {{ tls_cert.name }}
+  ansible.builtin.command:
+    cmd: >-
+      openssl req -new
+      -key {{ edge_ca_local_issued_dir }}/{{ inventory_hostname }}/{{ tls_cert.name }}.key
+      -out {{ edge_ca_local_issued_dir }}/{{ inventory_hostname }}/{{ tls_cert.name }}.csr
+      -subj /CN={{ tls_cert.common_name }}
+    creates: "{{ edge_ca_local_issued_dir }}/{{ inventory_hostname }}/{{ tls_cert.name }}.csr"
+  delegate_to: localhost
+  become: false
+
+- name: Sign certificate for {{ tls_cert.name }}
+  ansible.builtin.command:
+    cmd: >-
+      openssl x509 -req
+      -in {{ edge_ca_local_issued_dir }}/{{ inventory_hostname }}/{{ tls_cert.name }}.csr
+      -CA {{ edge_ca_root_cert }}
+      -CAkey {{ edge_ca_root_key }}
+      -CAserial {{ edge_ca_serial_file }}
+      -CAcreateserial
+      -out {{ edge_ca_local_issued_dir }}/{{ inventory_hostname }}/{{ tls_cert.name }}.crt
+      -days {{ tls_cert.days | default(90) }}
+      -sha256
+      -extfile {{ edge_ca_local_issued_dir }}/{{ inventory_hostname }}/{{ tls_cert.name }}.ext
+      -extensions v3_req
+    creates: "{{ edge_ca_local_issued_dir }}/{{ inventory_hostname }}/{{ tls_cert.name }}.crt"
+  delegate_to: localhost
+  become: false
+
+- name: Copy certificate to edge host for {{ tls_cert.name }}
+  ansible.builtin.copy:
+    src: "{{ edge_ca_local_issued_dir }}/{{ inventory_hostname }}/{{ tls_cert.name }}.crt"
+    dest: "{{ tls_cert.cert_path | default(envoy_tls_cert_dir ~ '/' ~ tls_cert.name ~ '.crt') }}"
+    owner: envoy
+    group: envoy
+    mode: "0644"
+
+- name: Copy private key to edge host for {{ tls_cert.name }}
+  ansible.builtin.copy:
+    src: "{{ edge_ca_local_issued_dir }}/{{ inventory_hostname }}/{{ tls_cert.name }}.key"
+    dest: "{{ tls_cert.key_path | default(envoy_tls_cert_dir ~ '/' ~ tls_cert.name ~ '.key') }}"
+    owner: envoy
+    group: envoy
+    mode: "0600"

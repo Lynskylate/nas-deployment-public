@@ -1,0 +1,77 @@
+---
+# Verify Mihomo Deployment on Aliyun Server
+# Usage: ansible-playbook -i inventory-aliyun.ini verify-aliyun.yml
+
+- name: Verify Mihomo Deployment on Aliyun Server
+  hosts: aliyun_server
+  become: false
+
+  tasks:
+    - name: Check mihomo service status
+      ansible.builtin.systemd:
+        name: mihomo
+      register: mihomo_status
+
+    - name: Check envoy service status
+      ansible.builtin.systemd:
+        name: envoy
+      register: envoy_status
+
+    - name: Check mihomo ports
+      ansible.builtin.shell: ss -tulnp | grep -E ':(7890|9090|8888)' || echo "Ports not found"
+      register: port_check
+      changed_when: false
+
+    - name: Test mihomo API with secret (local)
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9090/"
+        headers:
+          Authorization: "Bearer {{ mihomo_secret }}"
+        return_content: false
+      register: api_test_local
+      ignore_errors: true
+
+    - name: Test mihomo API via Envoy (public)
+      ansible.builtin.uri:
+        url: "http://{{ ansible_default_ipv4.address }}/mihomo/"
+        headers:
+          Authorization: "Bearer {{ mihomo_secret }}"
+        return_content: false
+      register: api_test_public
+      ignore_errors: true
+
+    - name: Test mihomo proxy via shell (public, with auth)
+      ansible.builtin.shell: curl -s -u {{ proxy_auth_username }}:{{ proxy_auth_password }} -x http://127.0.0.1:8888 https://api.ipify.org?format=text
+      register: proxy_public_test
+      ignore_errors: true
+      changed_when: false
+
+    - name: Test mihomo proxy via shell (public, without auth - should fail)
+      ansible.builtin.shell: curl -s -x http://127.0.0.1:8888 https://api.ipify.org?format=text
+      register: proxy_no_auth_test
+      ignore_errors: true
+      changed_when: false
+
+    - name: Display verification results
+      ansible.builtin.debug:
+        msg:
+          - "=== Service Status ==="
+          - "Mihomo: {{ mihomo_status.status.ActiveState }} ({{ mihomo_status.status.SubState }})"
+          - "Envoy: {{ envoy_status.status.ActiveState }} ({{ envoy_status.status.SubState }})"
+          - ""
+          - "=== Port Status ==="
+          - "{{ port_check.stdout_lines }}"
+          - ""
+          - "=== API Tests ==="
+          - "Local API (127.0.0.1:9090): {{ 'OK' if api_test_local.status == 200 else 'FAILED (' ~ api_test_local.status ~ ')' }}"
+          - "Public API (via Envoy): {{ 'OK' if api_test_public.status == 200 else 'FAILED (' ~ api_test_public.status ~ ')' }}"
+          - ""
+          - "=== Proxy Tests ==="
+          - "Public Proxy (8888, with auth): {{ 'OK - IP: ' ~ proxy_public_test.stdout if proxy_public_test.rc == 0 else 'FAILED' }}"
+          - "Public Proxy (8888, no auth): {{ 'FAILED as expected' if proxy_no_auth_test.rc != 0 else 'UNEXPECTED - IP: ' ~ proxy_no_auth_test.stdout }}"
+          - ""
+          - "=== Deployment Summary ==="
+          - "Mihomo Local Proxy: 127.0.0.1:7890"
+          - "Mihomo Public Proxy: http://{{ ansible_default_ipv4.address }}:8888"
+          - "Mihomo API: http://{{ ansible_default_ipv4.address }}/mihomo/"
+          - "Authentication: enabled via private runtime overlay"

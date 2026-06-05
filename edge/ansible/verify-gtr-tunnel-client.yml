@@ -1,0 +1,37 @@
+---
+- name: Verify tunnel client stack on GTR
+  hosts: gtr_core
+  become: true
+
+  tasks:
+    - name: Check tunnel client services
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+      register: tunnel_client_services
+      loop:
+        - shadow-tls-client
+        - shadowsocks-client
+
+    - name: Assert tunnel client services are active
+      ansible.builtin.assert:
+        that:
+          - item.status.ActiveState == "active"
+        fail_msg: "Tunnel client service {{ item.item }} is not active on {{ inventory_hostname }}"
+      loop: "{{ tunnel_client_services.results }}"
+
+    - name: Assert tunnel client ports are listening on localhost
+      ansible.builtin.shell: |
+        set -e
+        ss -tulnp | grep -q '127.0.0.1:{{ shadowtls_client_listen_port }}'
+        ss -tulnp | grep -q '{{ shadowsocks_client_local_address }}:{{ shadowsocks_client_port }}'
+      changed_when: false
+
+    - name: Test SOCKS5 proxy reachability through tunnel
+      ansible.builtin.shell: |
+        timeout 15 curl --socks5 127.0.0.1:{{ shadowsocks_client_port }} https://api.ipify.org
+      register: tunnel_proxy_ip
+      changed_when: false
+
+    - name: Display egress IP through tunnel
+      ansible.builtin.debug:
+        msg: "GTR tunnel egress IP: {{ tunnel_proxy_ip.stdout }}"

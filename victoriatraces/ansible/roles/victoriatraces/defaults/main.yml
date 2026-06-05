@@ -1,0 +1,13 @@
+---
+# VictoriaTraces Configuration
+
+victoriatraces_version: "0.7.1"
+victoriatraces_download_url: "https://github.com/VictoriaMetrics/VictoriaTraces/releases/download/v{{ victoriatraces_version }}"
+
+victoriatraces_user: "victoriatraces"
+victoriatraces_group: "victoriatraces"
+
+victoriatraces_bin_path: "/usr/local/victoriatraces"
+victoriatraces_data_path: "/var/lib/victoriatraces/data"
+victoriatraces_http_port: 9428
+victoriatraces_grpc_port: 9429

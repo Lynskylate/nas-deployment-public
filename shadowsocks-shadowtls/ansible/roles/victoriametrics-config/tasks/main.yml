@@ -1,0 +1,77 @@
+---
+# VictoriaMetrics scrape configuration update for remote proxy edge metrics.
+
+- name: Check if VictoriaMetrics config file exists
+  ansible.builtin.stat:
+    path: "{{ vm_config_path }}/{{ vm_scrape_config }}"
+  register: vm_config
+
+- name: Fail when VictoriaMetrics scrape config is missing
+  ansible.builtin.fail:
+    msg: "VictoriaMetrics scrape config not found: {{ vm_config_path }}/{{ vm_scrape_config }}"
+  when: not vm_config.stat.exists
+
+- name: Read existing VictoriaMetrics configuration
+  ansible.builtin.slurp:
+    src: "{{ vm_config_path }}/{{ vm_scrape_config }}"
+  register: existing_config
+
+- name: Parse existing configuration
+  ansible.builtin.set_fact:
+    parsed_config: "{{ existing_config.content | b64decode | from_yaml }}"
+
+- name: Remove legacy remote proxy scrape jobs
+  ansible.builtin.set_fact:
+    merged_scrape_configs: >-
+      {{
+        parsed_config.scrape_configs
+        | default([])
+        | rejectattr('job_name', 'in', ['remote_server', 'remote_server_envoy', 'edge_proxy_remote_proxy'])
+        | list
+      }}
+
+- name: Append unified edge-proxy remote job
+  ansible.builtin.set_fact:
+    merged_scrape_configs: "{{ merged_scrape_configs + [ {
+      'job_name': 'edge_proxy_remote_proxy',
+      'scrape_interval': '15s',
+      'metrics_path': '/metrics',
+      'static_configs': [
+        {
+          'targets': [ remote_server_ip + ':80' ],
+          'labels': {
+            'server': 'remote_proxy',
+            'role': 'edge_proxy'
+          }
+        }
+      ]
+    } ] }}"
+
+- name: Write merged VictoriaMetrics configuration
+  ansible.builtin.copy:
+    content: "{{ {'scrape_configs': merged_scrape_configs} | to_nice_yaml(indent=2) }}"
+    dest: "{{ vm_config_path }}/{{ vm_scrape_config }}"
+    owner: root
+    group: root
+    mode: "0644"
+    backup: true
+  notify:
+    - restart victoriametrics
+
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for VictoriaMetrics to be ready
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 8428
+    timeout: 60
+
+- name: Verify scrape targets include unified edge remote job
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:8428/api/v1/targets"
+    return_content: true
+  register: targets_response
+  until: "'edge_proxy_remote_proxy' in targets_response.content"
+  retries: 5
+  delay: 5

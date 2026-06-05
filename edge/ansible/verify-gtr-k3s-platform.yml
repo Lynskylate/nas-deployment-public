@@ -1,0 +1,43 @@
+---
+- name: Verify K3s server on GTR
+  hosts: gtr_core
+  become: true
+
+  tasks:
+    - name: Check k3s service state
+      ansible.builtin.command: systemctl is-active k3s
+      register: k3s_server_state
+      changed_when: false
+
+    - name: Check K3s node summary
+      ansible.builtin.command: k3s kubectl get nodes -o wide
+      register: k3s_nodes
+      changed_when: false
+
+    - name: Show K3s server summary
+      ansible.builtin.debug:
+        msg:
+          - "k3s service: {{ k3s_server_state.stdout }}"
+          - "{{ k3s_nodes.stdout }}"
+
+- name: Verify K3s agents on edge nodes
+  hosts: edge_aliyun:edge_tencent
+  become: true
+
+  tasks:
+    - name: Check k3s-agent service state
+      ansible.builtin.command: systemctl is-active k3s-agent
+      register: k3s_agent_state
+      changed_when: false
+
+    - name: Read tailscale IPv4 address
+      ansible.builtin.command: tailscale ip -4
+      register: k3s_agent_tailscale_ip
+      changed_when: false
+
+    - name: Show K3s agent summary
+      ansible.builtin.debug:
+        msg:
+          - "host={{ inventory_hostname }}"
+          - "k3s-agent={{ k3s_agent_state.stdout }}"
+          - "tailscale_ip={{ k3s_agent_tailscale_ip.stdout_lines[0] | default('missing') }}"

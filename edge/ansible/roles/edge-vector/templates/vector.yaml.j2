@@ -1,0 +1,83 @@
+data_dir: {{ vector_data_dir }}
+
+sources:
+  envoy_access_log:
+    type: file
+    include:
+      - /var/log/envoy/access.log
+    read_from: beginning
+
+  edge_metrics:
+    type: prometheus_scrape
+    endpoints:
+      - "http://127.0.0.1:{{ envoy_admin_port }}/stats/prometheus"
+      - "http://127.0.0.1:{{ node_exporter_port }}/metrics"
+    scrape_interval_secs: 15
+
+  edge_otlp:
+    type: opentelemetry
+    grpc:
+      address: "{{ edge_vector_otlp_grpc_listen }}"
+    http:
+      address: "{{ edge_vector_otlp_http_listen }}"
+      headers: []
+
+transforms:
+  enrich_logs:
+    type: remap
+    inputs:
+      - envoy_access_log
+    source: |
+      .host = get_hostname!()
+      .service = "envoy"
+      .container_name = "envoy"
+      if !exists(.timestamp) {
+        .timestamp = now()
+      }
+
+sinks:
+{% if edge_vector_sink_type == "victorialogs" %}
+  victorialogs:
+    type: elasticsearch
+    inputs:
+      - enrich_logs
+    endpoints:
+      - "http://{{ victorialogs_host }}:{{ victorialogs_port }}/insert/elasticsearch/"
+    mode: bulk
+    api_version: v8
+    healthcheck:
+      enabled: false
+    query:
+      _msg_field: message
+      _time_field: timestamp
+      _stream_fields: host,container_name
+{% else %}
+  local_file:
+    type: file
+    inputs:
+      - enrich_logs
+    path: "{{ vector_log_path }}/vector-edge.log"
+    encoding:
+      codec: json
+{% endif %}
+
+  victoriametrics:
+    type: prometheus_remote_write
+    inputs:
+      - edge_metrics
+      - edge_otlp.metrics
+    endpoint: "http://{{ victoriametrics_host }}:{{ victoriametrics_port }}/api/v1/write"
+    healthcheck:
+      enabled: false
+
+  victoriatraces:
+    type: opentelemetry
+    inputs:
+      - edge_otlp.traces
+    protocol:
+      type: http
+      uri: "http://{{ victoriatraces_host }}:{{ victoriatraces_http_port }}/insert/opentelemetry/v1/traces"
+      encoding:
+        codec: otlp
+    healthcheck:
+      enabled: false

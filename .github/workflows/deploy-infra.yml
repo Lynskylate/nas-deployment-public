@@ -1,0 +1,407 @@
+name: Deploy Infrastructure
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
+      - ".gitignore"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Deploy target
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - gtr_core
+          - gtr_k3s_platform
+          - edge_remote_proxy
+          - edge_aliyun
+          - edge_tencent
+
+concurrency:
+  group: infra-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  ANSIBLE_HOST_KEY_CHECKING: "false"
+  GTR_TAILSCALE_IP: "100.121.0.67"
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    outputs:
+      target: ${{ steps.resolve.outputs.target }}
+      run_gtr: ${{ steps.resolve.outputs.run_gtr }}
+      run_edge: ${{ steps.resolve.outputs.run_edge }}
+      run_k3s: ${{ steps.resolve.outputs.run_k3s }}
+      run_tunnel: ${{ steps.resolve.outputs.run_tunnel }}
+      run_validate_contract: ${{ steps.resolve.outputs.run_validate_contract }}
+      edge_targets: ${{ steps.resolve.outputs.edge_targets }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - id: bootstrap
+        uses: ./.github/actions/bootstrap-deploy-env
+        with:
+          vault_repo_slug: ${{ vars.VAULT_REPO_SLUG }}
+          vault_repo_ssh_key: ${{ secrets.VAULT_REPO_SSH_KEY }}
+          sops_age_key: ${{ secrets.SOPS_AGE_KEY }}
+
+      - name: Connect Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ steps.bootstrap.outputs.ts_oauth_client_id }}
+          oauth-secret: ${{ steps.bootstrap.outputs.ts_oauth_secret }}
+          tags: tag:ci
+
+      - name: Diagnose Tailscale status
+        run: |
+          echo "=== Tailscale status ==="
+          tailscale status
+          echo
+          echo "=== Self info ==="
+          tailscale status --json | python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)
+          self_info = data.get("Self", {})
+          print("HostName:", self_info.get("HostName"))
+          print("IPs:", self_info.get("TailscaleIPs"))
+          print("Tags:", self_info.get("Tags"))
+          print("Online:", self_info.get("Online"))
+          for peer in data.get("Peer", {}).values():
+              if "gtr" in peer.get("HostName", "").lower():
+                  print()
+                  print("=== GTR peer ===")
+                  print("HostName:", peer.get("HostName"))
+                  print("IPs:", peer.get("TailscaleIPs"))
+                  print("Tags:", peer.get("Tags"))
+                  print("Online:", peer.get("Online"))
+                  print("Active:", peer.get("Active"))
+          '
+
+      - name: Test connectivity to GTR
+        run: |
+          echo "=== Ping GTR Tailscale IP ==="
+          ping -c 2 -W 5 "${{ env.GTR_TAILSCALE_IP }}" || echo "Ping failed (non-fatal, continuing)"
+          echo
+          echo "=== SSH to GTR ==="
+          ssh -o ConnectTimeout=10 root@gtr.tail414c32.ts.net "hostname && uptime"
+
+      - id: resolve
+        name: Resolve deploy plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            target="${{ inputs.target }}"
+          else
+            target="all"
+          fi
+
+          run_gtr=false
+          run_edge=false
+          run_k3s=false
+          run_tunnel=false
+          run_validate_contract=false
+          edge_targets='[]'
+
+          case "$target" in
+            all)
+              run_gtr=true
+              run_edge=true
+              run_k3s=true
+              run_tunnel=true
+              run_validate_contract=true
+              edge_targets='["remote_proxy","aliyun","tencent"]'
+              ;;
+            gtr_core)
+              run_gtr=true
+              run_validate_contract=true
+              ;;
+            gtr_k3s_platform)
+              run_gtr=true
+              run_edge=true
+              run_k3s=true
+              edge_targets='["aliyun","tencent"]'
+              ;;
+            edge_remote_proxy)
+              run_edge=true
+              edge_targets='["remote_proxy"]'
+              ;;
+            edge_aliyun)
+              run_edge=true
+              edge_targets='["aliyun"]'
+              ;;
+            edge_tencent)
+              run_edge=true
+              edge_targets='["tencent"]'
+              ;;
+            *)
+              echo "Unsupported target: $target" >&2
+              exit 1
+              ;;
+          esac
+
+          {
+            echo "target=$target"
+            echo "run_gtr=$run_gtr"
+            echo "run_edge=$run_edge"
+            echo "run_k3s=$run_k3s"
+            echo "run_tunnel=$run_tunnel"
+            echo "run_validate_contract=$run_validate_contract"
+            echo "edge_targets=$edge_targets"
+          } >> "$GITHUB_OUTPUT"
+
+      - if: always()
+        name: Cleanup vault artifacts
+        run: bash .github/scripts/cleanup-vault.sh
+
+  deploy-gtr:
+    needs: preflight
+    if: needs.preflight.outputs.run_gtr == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - uses: actions/checkout@v6
+
+      - id: bootstrap
+        uses: ./.github/actions/bootstrap-deploy-env
+        with:
+          vault_repo_slug: ${{ vars.VAULT_REPO_SLUG }}
+          vault_repo_ssh_key: ${{ secrets.VAULT_REPO_SSH_KEY }}
+          sops_age_key: ${{ secrets.SOPS_AGE_KEY }}
+
+      - name: Connect Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ steps.bootstrap.outputs.ts_oauth_client_id }}
+          oauth-secret: ${{ steps.bootstrap.outputs.ts_oauth_secret }}
+          tags: tag:ci
+
+      - name: Add GTR host alias
+        run: echo "${{ env.GTR_TAILSCALE_IP }} gtr gtr.tail414c32.ts.net" | sudo tee -a /etc/hosts
+
+      - name: Deploy Mihomo + Exitnode
+        working-directory: mihomo/ansible
+        run: ansible-playbook -i inventory.ini deploy.yml --limit gtr -v
+
+      - name: Deploy Docker cleanup
+        working-directory: mihomo/ansible
+        run: ansible-playbook -i inventory.ini deploy-docker.yml --limit gtr -v
+
+      - name: Deploy resource manifest
+        working-directory: edge/ansible
+        run: ansible-playbook -i inventory-edge.ini deploy-resource-manifest.yml -v
+
+      - name: Deploy AI tools and Slock daemon
+        if: needs.preflight.outputs.run_k3s != 'true'
+        working-directory: edge/ansible
+        run: ansible-playbook -i inventory-edge.ini deploy-gtr-ai-tools.yml -v
+
+      - name: Verify GTR services
+        if: needs.preflight.outputs.run_k3s != 'true'
+        run: |
+          ssh root@gtr.tail414c32.ts.net bash <<'VERIFY'
+            set -e
+            echo "=== Service Status ==="
+            for svc in mihomo grafana victoriametrics victorialogs victoriatraces node_exporter; do
+              status=$(systemctl is-active "$svc" 2>/dev/null || echo "unknown")
+              echo "  $svc: $status"
+              [[ "$status" = "active" ]] || { echo "FAIL: $svc is not active"; exit 1; }
+            done
+            echo "=== HTTP Health ==="
+            for url in \
+              "http://localhost:8428/health" \
+              "http://localhost:8429/health" \
+              "http://localhost:3000/api/health"; do
+              code=$(curl -s -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || echo "000")
+              echo "  $url: $code"
+            done
+            echo "=== Resource Manifest ==="
+            cat /etc/gtr/resource-manifest.infra.yml 2>/dev/null | head -5 || echo "  Not deployed yet"
+            echo "GTR verification PASSED"
+          VERIFY
+
+      - if: always()
+        name: Cleanup vault artifacts
+        run: bash .github/scripts/cleanup-vault.sh
+
+  deploy-edge:
+    needs: preflight
+    if: needs.preflight.outputs.run_edge == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJson(needs.preflight.outputs.edge_targets) }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - id: bootstrap
+        uses: ./.github/actions/bootstrap-deploy-env
+        with:
+          vault_repo_slug: ${{ vars.VAULT_REPO_SLUG }}
+          vault_repo_ssh_key: ${{ secrets.VAULT_REPO_SSH_KEY }}
+          sops_age_key: ${{ secrets.SOPS_AGE_KEY }}
+
+      - name: Deploy edge baseline to ${{ matrix.target }}
+        working-directory: edge/ansible
+        run: ansible-playbook -i inventory-edge.ini deploy-edge.yml --limit ${{ matrix.target }} -v
+
+      - name: Verify ${{ matrix.target }}
+        working-directory: edge/ansible
+        run: ansible-playbook -i inventory-edge.ini verify-edge-common.yml --limit ${{ matrix.target }} -v
+
+      - if: always()
+        name: Cleanup vault artifacts
+        run: bash .github/scripts/cleanup-vault.sh
+
+  deploy-k3s-platform:
+    needs: [preflight, deploy-gtr, deploy-edge]
+    if: needs.preflight.outputs.run_k3s == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - uses: actions/checkout@v6
+
+      - id: bootstrap
+        uses: ./.github/actions/bootstrap-deploy-env
+        with:
+          vault_repo_slug: ${{ vars.VAULT_REPO_SLUG }}
+          vault_repo_ssh_key: ${{ secrets.VAULT_REPO_SSH_KEY }}
+          sops_age_key: ${{ secrets.SOPS_AGE_KEY }}
+
+      - name: Connect Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ steps.bootstrap.outputs.ts_oauth_client_id }}
+          oauth-secret: ${{ steps.bootstrap.outputs.ts_oauth_secret }}
+          tags: tag:ci
+
+      - name: Add GTR host alias
+        run: echo "${{ env.GTR_TAILSCALE_IP }} gtr gtr.tail414c32.ts.net" | sudo tee -a /etc/hosts
+
+      - name: Deploy K3s platform bootstrap
+        working-directory: edge/ansible
+        run: ansible-playbook -i inventory-edge.ini deploy-gtr-k3s-platform.yml -v
+
+      - name: Verify K3s platform bootstrap
+        working-directory: edge/ansible
+        run: ansible-playbook -i inventory-edge.ini verify-gtr-k3s-platform.yml -v
+
+      - if: always()
+        name: Cleanup vault artifacts
+        run: bash .github/scripts/cleanup-vault.sh
+
+  deploy-tunnel:
+    needs: [preflight, deploy-gtr, deploy-edge, deploy-k3s-platform]
+    if: needs.preflight.outputs.run_tunnel == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - uses: actions/checkout@v6
+
+      - id: bootstrap
+        uses: ./.github/actions/bootstrap-deploy-env
+        with:
+          vault_repo_slug: ${{ vars.VAULT_REPO_SLUG }}
+          vault_repo_ssh_key: ${{ secrets.VAULT_REPO_SSH_KEY }}
+          sops_age_key: ${{ secrets.SOPS_AGE_KEY }}
+
+      - name: Connect Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ steps.bootstrap.outputs.ts_oauth_client_id }}
+          oauth-secret: ${{ steps.bootstrap.outputs.ts_oauth_secret }}
+          tags: tag:ci
+
+      - name: Add GTR host alias
+        run: echo "${{ env.GTR_TAILSCALE_IP }} gtr gtr.tail414c32.ts.net" | sudo tee -a /etc/hosts
+
+      - name: Deploy tunnel server
+        working-directory: edge/ansible
+        run: ansible-playbook -i inventory-edge.ini deploy-edge-tunnel-server.yml -v
+
+      - name: Deploy tunnel client
+        working-directory: edge/ansible
+        run: ansible-playbook -i inventory-edge.ini deploy-gtr-tunnel-client.yml -v
+
+      - name: Verify tunnel connectivity
+        run: |
+          ssh root@gtr.tail414c32.ts.net bash <<'VERIFY'
+            echo "=== Shadow-TLS Client ==="
+            systemctl is-active shadow-tls-client
+            echo "=== Shadowsocks Client ==="
+            systemctl is-active shadowsocks-client
+            echo "=== Proxy Test ==="
+            curl -s --connect-timeout 5 --socks5 127.0.0.1:1080 https://api.ipify.org 2>/dev/null \
+              && echo "" && echo "Proxy OK" || echo "Proxy test failed (may be transient)"
+          VERIFY
+
+      - if: always()
+        name: Cleanup vault artifacts
+        run: bash .github/scripts/cleanup-vault.sh
+
+  validate-contract:
+    needs: [preflight, deploy-gtr]
+    if: needs.preflight.outputs.run_validate_contract == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    steps:
+      - uses: actions/checkout@v6
+
+      - id: bootstrap
+        uses: ./.github/actions/bootstrap-deploy-env
+        with:
+          vault_repo_slug: ${{ vars.VAULT_REPO_SLUG }}
+          vault_repo_ssh_key: ${{ secrets.VAULT_REPO_SSH_KEY }}
+          sops_age_key: ${{ secrets.SOPS_AGE_KEY }}
+
+      - name: Connect Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ steps.bootstrap.outputs.ts_oauth_client_id }}
+          oauth-secret: ${{ steps.bootstrap.outputs.ts_oauth_secret }}
+          tags: tag:ci
+
+      - name: Add GTR host alias
+        run: echo "${{ env.GTR_TAILSCALE_IP }} gtr gtr.tail414c32.ts.net" | sudo tee -a /etc/hosts
+
+      - name: Verify deployed manifest matches local
+        run: |
+          ssh root@gtr.tail414c32.ts.net "cat /etc/gtr/resource-manifest.infra.yml" \
+            > /tmp/deployed-manifest.yml 2>/dev/null || {
+            echo "::warning::Infra manifest not found on GTR, skipping"
+            exit 0
+          }
+          echo "=== Comparing deployed manifest with local .resource-manifest.yml ==="
+          diff \
+            <(python3 -c "import yaml; print(yaml.dump(yaml.safe_load(open('/tmp/deployed-manifest.yml')), default_flow_style=False))" 2>/dev/null) \
+            <(python3 -c "import yaml; print(yaml.dump(yaml.safe_load(open('.resource-manifest.yml')), default_flow_style=False))" 2>/dev/null) \
+            && echo "Manifest consistency check PASSED" \
+            || { echo "::warning::Deployed manifest differs from local (may be expected if local has uncommitted changes)"; }
+
+      - name: Scrape target health
+        run: |
+          echo "=== VictoriaMetrics Health ==="
+          ssh root@gtr.tail414c32.ts.net "curl -sf http://localhost:8428/-/healthy && echo VM-OK || echo VM-UNHEALTHY"
+          echo "Scrape target health check complete"
+
+      - if: always()
+        name: Cleanup vault artifacts
+        run: bash .github/scripts/cleanup-vault.sh

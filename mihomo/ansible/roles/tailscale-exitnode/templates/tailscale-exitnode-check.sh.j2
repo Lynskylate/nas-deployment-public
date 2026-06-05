@@ -1,0 +1,34 @@
+#!/bin/bash
+# Tailscale exit node rule health check for node_exporter textfile collector
+# NOTE: Intentionally avoids set -e because grep exit codes are used as values
+# NOTE: Superseded by tailscale-exitnode-monitor.sh (adds auto-fix).
+#       This script is kept for manual diagnostics.
+
+OUTPUT_FILE="{{ tailscale_exitnode_textfile_dir }}/tailscale_exitnode.prom"
+TEMP="${OUTPUT_FILE}.$$"
+
+WAN=$({{ ip_binary }} route show default | awk '/default/ {print $5; exit}')
+[ -z "$WAN" ] && WAN="unknown"
+
+if {{ ip_binary }} rule show | grep -q "from {{ tailscale_cidr }} lookup {{ mihomo_route_table }}"; then
+    IP_RULE=1
+else
+    IP_RULE=0
+fi
+
+if {{ nft_binary }} list chain ip nat POSTROUTING 2>/dev/null | grep -q "oifname \"${WAN}\" masquerade"; then
+    NFT_MASQ=1
+else
+    NFT_MASQ=0
+fi
+
+cat > "$TEMP" <<EOF
+# HELP tailscale_exitnode_ip_rule_present 1 if ip rule exists, 0 otherwise
+# TYPE tailscale_exitnode_ip_rule_present gauge
+tailscale_exitnode_ip_rule_present{source_cidr="{{ tailscale_cidr }}",table="{{ mihomo_route_table }}",priority="{{ tailscale_exitnode_rule_priority }}"} $IP_RULE
+# HELP tailscale_exitnode_nft_masquerade_present 1 if nftables MASQUERADE rule exists, 0 otherwise
+# TYPE tailscale_exitnode_nft_masquerade_present gauge
+tailscale_exitnode_nft_masquerade_present{iface="${WAN}"} $NFT_MASQ
+EOF
+
+mv -f "$TEMP" "$OUTPUT_FILE"

@@ -1,0 +1,274 @@
+---
+# Mihomo Monitoring Integration Deployment
+# Deploys metrics collector and log forwarding to VictoriaMetrics/VictoriaLogs
+
+- name: Deploy Mihomo Monitoring Integration
+  hosts: client_server
+  become: true
+  vars_files:
+    - ../../ansible/group_vars/all/public.yml
+    - ../../ansible/group_vars/all/secret.runtime.yml
+  vars:
+    mihomo_api_url: "http://127.0.0.1:9090"
+    victoriametrics_url: "http://127.0.0.1:8428"
+    victorialogs_url: "http://127.0.0.1:8429"
+    server_label: "gtr"
+    vector_version: "v0.53.0"
+    vector_version_short: '{{ vector_version | regex_replace("^v", "") }}'
+    vector_arch: "x86_64-unknown-linux-gnu"
+    vector_archive_path: "/tmp/vector-{{ vector_version_short }}-{{ vector_arch }}.tar.gz"
+    vector_extract_dir: "/tmp/vector-{{ vector_version }}-{{ vector_arch }}"
+    vector_download_proxy: "http://127.0.0.1:7890"
+
+  tasks:
+    - name: Check if Mihomo is running
+      ansible.builtin.systemd:
+        name: mihomo.service
+      register: mihomo_status
+      failed_when: false
+
+    - name: Fail if Mihomo is not running
+      ansible.builtin.fail:
+        msg: "Mihomo service is not running. Please start mihomo first."
+      when: mihomo_status.status.ActiveState != "active"
+
+    - name: Create mihomo log directory
+      ansible.builtin.file:
+        path: /var/log/mihomo
+        state: directory
+        owner: mihomo
+        group: mihomo
+        mode: '0755'
+
+    - name: Install required packages
+      ansible.builtin.apt:
+        name:
+          - jq
+          - python3-pip
+        state: present
+        update_cache: true
+
+    - name: Install websocket-client for Python
+      ansible.builtin.pip:
+        name: websocket-client
+        state: present
+
+    - name: Ensure Vector user exists
+      ansible.builtin.user:
+        name: vector
+        system: true
+        shell: /usr/sbin/nologin
+        create_home: false
+        state: present
+
+    - name: Check installed Vector version
+      ansible.builtin.command: /usr/bin/vector --version
+      register: vector_version_cmd
+      failed_when: false
+      changed_when: false
+
+    - name: Decide whether Vector upgrade is needed
+      ansible.builtin.set_fact:
+        vector_install_needed: "{{ vector_version_cmd.rc != 0 or ('vector ' ~ vector_version_short) not in vector_version_cmd.stdout }}"
+
+    - name: Download Vector {{ vector_version }} archive
+      ansible.builtin.get_url:
+        url: "https://github.com/vectordotdev/vector/releases/download/{{ vector_version }}/vector-{{ vector_version_short }}-{{ vector_arch }}.tar.gz"
+        dest: "{{ vector_archive_path }}"
+        mode: '0644'
+      environment:
+        http_proxy: "{{ vector_download_proxy }}"
+        https_proxy: "{{ vector_download_proxy }}"
+      when: vector_install_needed
+
+    - name: Create Vector extraction directory
+      ansible.builtin.file:
+        path: "{{ vector_extract_dir }}"
+        state: directory
+        mode: '0755'
+      when: vector_install_needed
+
+    - name: Extract Vector archive
+      ansible.builtin.unarchive:
+        src: "{{ vector_archive_path }}"
+        dest: "{{ vector_extract_dir }}"
+        remote_src: true
+      when: vector_install_needed
+
+    - name: Install Vector binary to /usr/bin/vector
+      ansible.builtin.copy:
+        src: "{{ vector_extract_dir }}/vector-{{ vector_arch }}/bin/vector"
+        dest: /usr/bin/vector
+        owner: root
+        group: root
+        mode: '0755'
+        remote_src: true
+      when: vector_install_needed
+      notify: restart vector
+
+    # Deploy Metrics Collector Script
+    - name: Copy mihomo metrics collector script
+      ansible.builtin.template:
+        src: ../templates/mihomo-metrics.sh.j2
+        dest: /usr/local/bin/mihomo-metrics.sh
+        owner: root
+        group: root
+        mode: '0755'
+
+    # Deploy Systemd Service and Timer
+    - name: Copy mihomo metrics systemd service
+      ansible.builtin.template:
+        src: ../templates/mihomo-metrics.service.j2
+        dest: /etc/systemd/system/mihomo-metrics.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify: reload systemd
+
+    - name: Copy mihomo metrics systemd timer
+      ansible.builtin.template:
+        src: ../templates/mihomo-metrics.timer.j2
+        dest: /etc/systemd/system/mihomo-metrics.timer
+        owner: root
+        group: root
+        mode: '0644'
+      notify: reload systemd
+
+    # Deploy Vector Configuration
+    - name: Copy Vector mihomo configuration
+      ansible.builtin.template:
+        src: ../templates/vector-mihomo.yaml.j2
+        dest: /etc/vector/mihomo.yaml
+        owner: root
+        group: root
+        mode: '0644'
+      notify: restart vector
+
+    - name: Update Vector service to load mihomo config
+      ansible.builtin.lineinfile:
+        path: /etc/systemd/system/vector.service
+        regexp: '^ExecStart=/usr/bin/vector'
+        line: 'ExecStart=/usr/bin/vector --config /etc/vector/vector.yaml --config /etc/vector/mihomo.yaml'
+        backrefs: true
+      notify: reload systemd and restart vector
+
+    # Enable and Start Services
+    - name: Enable and start mihomo metrics timer
+      ansible.builtin.systemd:
+        name: mihomo-metrics.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Start mihomo metrics collector once (immediate collection)
+      ansible.builtin.systemd:
+        name: mihomo-metrics.service
+        state: started
+
+    # Deploy WebSocket Logs Collector
+    - name: Copy mihomo logs collector script
+      ansible.builtin.template:
+        src: ../templates/mihomo-logs-collector.py.j2
+        dest: /usr/local/bin/mihomo-logs-collector.py
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Copy mihomo logs collector systemd service
+      ansible.builtin.template:
+        src: ../templates/mihomo-logs-collector.service.j2
+        dest: /etc/systemd/system/mihomo-logs-collector.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify: reload systemd
+
+    - name: Enable and start mihomo logs collector
+      ansible.builtin.systemd:
+        name: mihomo-logs-collector.service
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    # Verification
+    - name: Wait for metrics to be collected
+      ansible.builtin.wait_for:
+        timeout: 5
+
+    - name: Check mihomo metrics timer status
+      ansible.builtin.systemd:
+        name: mihomo-metrics.timer
+      register: timer_status
+
+    - name: Display timer status
+      ansible.builtin.debug:
+        var: timer_status.status
+
+    - name: Show Vector version after deployment
+      ansible.builtin.command: /usr/bin/vector --version
+      register: vector_version_after
+      changed_when: false
+
+    - name: Display Vector version after deployment
+      ansible.builtin.debug:
+        msg: "Vector version: {{ vector_version_after.stdout }}"
+
+    - name: Verify metrics in VictoriaMetrics
+      ansible.builtin.uri:
+        url: "{{ victoriametrics_url }}/api/v1/query"
+        method: GET
+        return_content: true
+        query:
+          query: 'mihomo_scrape_success'
+      register: vm_query
+      failed_when: false
+
+    - name: Display VictoriaMetrics query result
+      ansible.builtin.debug:
+        var: vm_query.json
+
+    - name: Create verification script
+      ansible.builtin.copy:
+        dest: /usr/local/bin/mihomo-monitoring-check.sh
+        content: |
+          #!/bin/bash
+          echo "=== Mihomo Monitoring Integration Check ==="
+          echo
+          echo "1. Mihomo Service Status:"
+          systemctl is-active mihomo && echo "  ✓ Mihomo running" || echo "  ✗ Mihomo not running"
+          echo
+          echo "2. Mihomo Metrics Collector Timer:"
+          systemctl is-active mihomo-metrics.timer && echo "  ✓ Timer running" || echo "  ✗ Timer not running"
+          echo
+          echo "3. Mihomo Logs Collector:"
+          systemctl is-active mihomo-logs-collector && echo "  ✓ Logs collector running" || echo "  ✗ Logs collector not running"
+          echo
+          echo "4. Last Metrics Collection:"
+          journalctl -u mihomo-metrics --no-pager -n 1 --output=cat
+          echo
+          echo "5. Vector Service Status:"
+          systemctl is-active vector && echo "  ✓ Vector running" || echo "  ✗ Vector not running"
+          echo
+          echo "6. Mihomo Metrics in VictoriaMetrics:"
+          curl -s '{{ victoriametrics_url }}/api/v1/query?query=mihomo_scrape_success' | jq -r '.data.result[] | "  \(.metric.server): \(.value[1])"' 2>/dev/null || echo "  No metrics found yet"
+          echo
+          echo "7. Mihomo Logs in VictoriaLogs:"
+          curl -s -G '{{ victorialogs_url }}/select/log/sql/query' --data-urlencode 'query={service="mihomo"} LIMIT 1' | jq -r '.data | length' | xargs -I {} echo "  Found {} log entries"
+          echo
+          echo "=== Check Complete ==="
+        mode: '0755'
+
+  handlers:
+    - name: reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: reload systemd and restart vector
+      ansible.builtin.systemd:
+        daemon_reload: true
+      notify: restart vector
+
+    - name: restart vector
+      ansible.builtin.systemd:
+        name: vector
+        state: restarted

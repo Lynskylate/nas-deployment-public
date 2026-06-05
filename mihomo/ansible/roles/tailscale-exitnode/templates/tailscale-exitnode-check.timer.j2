@@ -1,0 +1,9 @@
+[Unit]
+Description=Run tailscale exit node health check every 30s
+
+[Timer]
+OnCalendar=*:*:0/30
+Persistent=false
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,31 @@
+[Unit]
+Description=Shadow-TLS Server
+After=network-online.target shadowsocks-server.service envoy.service
+Wants=network-online.target
+Requires=shadowsocks-server.service
+
+[Service]
+Type=simple
+User=shadowtls
+Group=shadowtls
+ExecStart={{ stls_server_bin_path }}/shadow-tls \
+    --v3 \
+    server \
+    --listen 127.0.0.1:{{ shadowtls_server_listen_port }} \
+    --server 127.0.0.1:{{ shadowsocks_server_port }} \
+    --tls {{ shadowtls_sni_server }}:{{ shadowtls_sni_port }} \
+    --password {{ shadowtls_password }}
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

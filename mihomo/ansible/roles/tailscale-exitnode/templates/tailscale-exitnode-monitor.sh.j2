@@ -1,0 +1,96 @@
+#!/bin/bash
+# tailscale-exitnode-monitor.sh
+# Combined health check + auto-fix for exit node routing rules.
+# Runs via systemd timer every {{ tailscale_exitnode_monitor_interval }}s.
+# Reports metrics to node_exporter and logs fixes via syslog.
+
+NFT="{{ nft_binary }}"
+IP="{{ ip_binary }}"
+TAILSCALE_CIDR="{{ tailscale_cidr }}"
+ROUTE_TABLE="{{ mihomo_route_table }}"
+RULE_PRIO="{{ tailscale_exitnode_rule_priority }}"
+OUTPUT="{{ tailscale_exitnode_textfile_dir }}/tailscale_exitnode.prom"
+TEMP="${OUTPUT}.$$"
+FIXES=0
+
+# --- Detect WAN interface (default route) ---
+WAN=$(${IP} route show default | awk '/default/ {print $5; exit}')
+if [ -z "$WAN" ]; then
+    logger -t exitnode-monitor "WARN: no default route found, skipping"
+    exit 0
+fi
+
+# --- Check & fix exit node MASQUERADE ---
+MASQ_OK=0
+if ${NFT} list chain ip nat POSTROUTING 2>/dev/null | grep -q "oifname \"${WAN}\" masquerade"; then
+    MASQ_OK=1
+else
+    ${NFT} add rule ip nat POSTROUTING oifname "${WAN}" masquerade 2>/dev/null && {
+        MASQ_OK=1
+        FIXES=$((FIXES + 1))
+        logger -t exitnode-monitor "FIXED: added MASQUERADE on ${WAN}"
+    } || {
+        logger -t exitnode-monitor "FAIL: could not add MASQUERADE on ${WAN}"
+    }
+fi
+
+# --- Check & fix ip rule ---
+RULE_OK=0
+if ${IP} rule show | grep -q "from ${TAILSCALE_CIDR} lookup ${ROUTE_TABLE}"; then
+    RULE_OK=1
+else
+    ${IP} rule add from "${TAILSCALE_CIDR}" lookup "${ROUTE_TABLE}" priority "${RULE_PRIO}" 2>/dev/null && {
+        RULE_OK=1
+        FIXES=$((FIXES + 1))
+        logger -t exitnode-monitor "FIXED: added ip rule from ${TAILSCALE_CIDR} lookup ${ROUTE_TABLE}"
+    } || {
+        logger -t exitnode-monitor "FAIL: could not add ip rule"
+    }
+fi
+
+# --- Check & fix Docker bridge MASQUERADE rules ---
+# With iptables=false, Docker no longer manages these. Required for container NAT.
+{% for bridge in docker_bridges %}
+BRIDGE_{{ loop.index }}_OK=0
+if ${NFT} list chain ip nat POSTROUTING 2>/dev/null | grep -q 'saddr {{ bridge.subnet }}.*masquerade'; then
+    BRIDGE_{{ loop.index }}_OK=1
+else
+    ${NFT} insert rule ip nat POSTROUTING ip saddr {{ bridge.subnet }} oifname != "{{ bridge.bridge }}" masquerade 2>/dev/null && {
+        BRIDGE_{{ loop.index }}_OK=1
+        FIXES=$((FIXES + 1))
+        logger -t exitnode-monitor "FIXED: added Docker bridge MASQUERADE for {{ bridge.subnet }}"
+    } || {
+        logger -t exitnode-monitor "FAIL: could not add Docker bridge MASQUERADE for {{ bridge.subnet }}"
+    }
+fi
+{% endfor %}
+
+# --- Report Prometheus metrics ---
+cat > "${TEMP}" <<EOF
+# HELP tailscale_exitnode_wan_iface Current WAN interface (label value)
+# TYPE tailscale_exitnode_wan_iface gauge
+tailscale_exitnode_wan_iface{iface="${WAN}"} 1
+# HELP tailscale_exitnode_nft_masquerade_present 1 if MASQUERADE rule exists
+# TYPE tailscale_exitnode_nft_masquerade_present gauge
+tailscale_exitnode_nft_masquerade_present{iface="${WAN}"} ${MASQ_OK}
+# HELP tailscale_exitnode_ip_rule_present 1 if Tailscale ip rule exists
+# TYPE tailscale_exitnode_ip_rule_present gauge
+tailscale_exitnode_ip_rule_present{source_cidr="${TAILSCALE_CIDR}",table="${ROUTE_TABLE}"} ${RULE_OK}
+{% for bridge in docker_bridges %}
+# HELP tailscale_exitnode_docker_bridge_masquerade 1 if Docker bridge MASQUERADE exists
+# TYPE tailscale_exitnode_docker_bridge_masquerade gauge
+tailscale_exitnode_docker_bridge_masquerade{bridge="{{ bridge.bridge }}",subnet="{{ bridge.subnet }}"} ${BRIDGE_{{ loop.index }}_OK}
+{% endfor %}
+# HELP tailscale_exitnode_auto_fixes_total Number of auto-fixes applied this run
+# TYPE tailscale_exitnode_auto_fixes_total gauge
+tailscale_exitnode_auto_fixes_total ${FIXES}
+EOF
+
+mv -f "${TEMP}" "${OUTPUT}"
+
+# --- Log summary if fixes were applied ---
+if [ ${FIXES} -gt 0 ]; then
+    logger -t exitnode-monitor "Applied ${FIXES} fix(es). MASQUERADE=${MASQ_OK} RULE=${RULE_OK} WAN=${WAN}"
+fi
+
+exit 0

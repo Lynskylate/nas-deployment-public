@@ -1,0 +1,178 @@
+---
+- name: Create envoy user
+  ansible.builtin.user:
+    name: envoy
+    system: true
+    shell: /usr/sbin/nologin
+    home: /var/lib/envoy
+    create_home: true
+
+- name: Create managed envoy binary directory
+  ansible.builtin.file:
+    path: "{{ envoy_bin_path }}"
+    state: directory
+    owner: envoy
+    group: envoy
+    mode: "0755"
+  when: edge_manage_envoy_binary_dir | bool
+
+- name: Create envoy directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: envoy
+    group: envoy
+    mode: "0755"
+  loop:
+    - /etc/envoy
+    - "{{ envoy_dynamic_config_dir }}"
+    - "{{ envoy_tls_cert_dir }}"
+    - "{{ envoy_log_path }}"
+    - /var/lib/envoy
+
+- name: Ensure envoy log files are writable by envoy user
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: touch
+    owner: envoy
+    group: envoy
+    mode: "0644"
+  loop:
+    - "{{ envoy_log_path }}/access.log"
+    - "{{ envoy_log_path }}/admin_access.log"
+
+- name: Check envoy binary
+  ansible.builtin.stat:
+    path: "{{ envoy_bin_path }}/envoy"
+  register: envoy_binary
+
+- name: Download envoy binary
+  ansible.builtin.get_url:
+    url: "{{ envoy_download_url }}/{{ envoy_version }}/envoy-{{ envoy_version | regex_replace('^v', '') }}-linux-x86_64"
+    dest: "{{ envoy_bin_path }}/envoy"
+    owner: envoy
+    group: envoy
+    mode: "0755"
+    timeout: 300
+  environment: "{{ {'http_proxy': github_download_proxy, 'https_proxy': github_download_proxy} if (github_download_proxy | default('') | length > 0) else {} }}"
+  register: envoy_download_result
+  retries: 5
+  delay: 10
+  until: envoy_download_result is succeeded
+  when:
+    - not envoy_binary.stat.exists
+    - edge_manage_envoy_binary_dir | bool
+
+- name: Extract terminate routes
+  ansible.builtin.set_fact:
+    edge_terminate_routes: "{{ envoy_domain_routes | selectattr('mode', 'equalto', 'tls_terminate_http') | list }}"
+
+- name: Assert terminate routes have cert paths
+  ansible.builtin.assert:
+    that:
+      - item.cert_path is defined
+      - item.key_path is defined
+    fail_msg: "tls_terminate_http route {{ item.name }} requires cert_path and key_path"
+  loop: "{{ edge_terminate_routes }}"
+  when: edge_terminate_routes | length > 0
+
+- name: Check terminate route cert files exist
+  ansible.builtin.stat:
+    path: "{{ item.cert_path }}"
+  register: terminate_cert_files
+  loop: "{{ edge_terminate_routes }}"
+  when: edge_terminate_routes | length > 0
+
+- name: Check terminate route key files exist
+  ansible.builtin.stat:
+    path: "{{ item.key_path }}"
+  register: terminate_key_files
+  loop: "{{ edge_terminate_routes }}"
+  when: edge_terminate_routes | length > 0
+
+- name: Assert terminate cert files are present
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+    fail_msg: "Missing terminate cert/key file: {{ item.stat.path }}"
+  loop: "{{ (terminate_cert_files.results | default([])) + (terminate_key_files.results | default([])) }}"
+  when: edge_terminate_routes | length > 0
+
+- name: Deploy envoy systemd unit
+  ansible.builtin.template:
+    src: envoy.service.j2
+    dest: /etc/systemd/system/envoy.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart envoy
+
+- name: Deploy envoy bootstrap config
+  ansible.builtin.template:
+    src: envoy.yaml.j2
+    dest: /etc/envoy/envoy.yaml
+    owner: envoy
+    group: envoy
+    mode: "0644"
+  notify: restart envoy
+
+- name: Deploy envoy LDS config
+  ansible.builtin.template:
+    src: lds.yaml.j2
+    dest: "{{ envoy_dynamic_config_dir }}/lds.yaml"
+    owner: envoy
+    group: envoy
+    mode: "0644"
+  notify: restart envoy
+
+- name: Deploy envoy CDS config
+  ansible.builtin.template:
+    src: cds.yaml.j2
+    dest: "{{ envoy_dynamic_config_dir }}/cds.yaml"
+    owner: envoy
+    group: envoy
+    mode: "0644"
+  notify: restart envoy
+
+- name: Deploy envoy logrotate policy
+  ansible.builtin.template:
+    src: envoy.logrotate.j2
+    dest: /etc/logrotate.d/envoy
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Open firewall ports for edge entry (UFW)
+  ansible.builtin.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop: "{{ [envoy_listener_port] + ([envoy_http_listener_port] if (envoy_http_listener_enabled | bool) else []) }}"
+  when: ansible_facts['pkg_mgr'] == 'apt'
+  ignore_errors: true
+
+- name: Open firewall ports for edge entry (firewalld)
+  ansible.builtin.firewalld:
+    port: "{{ item }}/tcp"
+    permanent: true
+    state: enabled
+  loop: "{{ [envoy_listener_port] + ([envoy_http_listener_port] if (envoy_http_listener_enabled | bool) else []) }}"
+  when: ansible_facts['pkg_mgr'] in ['dnf', 'yum']
+  ignore_errors: true
+
+- name: Flush envoy handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure envoy enabled and running
+  ansible.builtin.systemd:
+    name: envoy
+    enabled: true
+    state: started
+
+- name: Wait for envoy admin port
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ envoy_admin_port }}"
+    timeout: 30

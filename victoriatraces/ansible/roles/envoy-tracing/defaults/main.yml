@@ -1,0 +1,8 @@
+---
+# Envoy Tracing Configuration for VictoriaTraces
+
+envoy_config_dir: /etc/envoy
+envoy_dynamic_config_dir: /etc/envoy/dynamic_config
+victoriatraces_http_port: 9428
+victoriatraces_grpc_port: 9429
+envoy_service_name: envoy-gtr

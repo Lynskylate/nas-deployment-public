@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# deploy-lock: 部署互斥锁 CLI
+# 用法: deploy-lock acquire | release | status | wait
+#
+# Ansible playbooks 在 pre_tasks 中调用 acquire，post_tasks 中调用 release
+# deployctl 在 SSH 执行前调用 wait，确保不会与 Ansible 冲突
+
+set -euo pipefail
+
+BUSY_TARGET="deploy-mutex-busy.target"
+LOCK_FILE="/var/run/deploy.lock"
+MAX_WAIT="${DEPLOY_LOCK_TIMEOUT:-600}"  # 默认等待 10 分钟
+
+case "${1:-status}" in
+  acquire)
+    if systemctl is-active --quiet "$BUSY_TARGET" 2>/dev/null; then
+      echo "LOCKED: Another deployment is in progress"
+      exit 1
+    fi
+    # 同时创建文件锁作为备用机制
+    exec 9>"$LOCK_FILE"
+    if ! flock -n 9; then
+      echo "LOCKED: File lock held by another process"
+      exit 1
+    fi
+    systemctl start "$BUSY_TARGET" 2>/dev/null || true
+    echo "ACQUIRED: Deploy lock held"
+    ;;
+  release)
+    systemctl stop "$BUSY_TARGET" 2>/dev/null || true
+    # 文件锁随进程退出自动释放
+    echo "RELEASED: Deploy lock released"
+    ;;
+  status)
+    if systemctl is-active --quiet "$BUSY_TARGET" 2>/dev/null; then
+      echo "LOCKED: Deployment in progress"
+      exit 1
+    else
+      echo "IDLE: No deployment in progress"
+      exit 0
+    fi
+    ;;
+  wait)
+    echo "Waiting for deploy lock (max ${MAX_WAIT}s)..."
+    elapsed=0
+    while systemctl is-active --quiet "$BUSY_TARGET" 2>/dev/null; do
+      if [[ $elapsed -ge $MAX_WAIT ]]; then
+        echo "TIMEOUT: Waited ${MAX_WAIT}s for deploy lock"
+        exit 1
+      fi
+      sleep 5
+      elapsed=$((elapsed + 5))
+    done
+    echo "READY: Deploy lock is free"
+    ;;
+  *)
+    echo "Usage: deploy-lock {acquire|release|status|wait}"
+    exit 1
+    ;;
+esac

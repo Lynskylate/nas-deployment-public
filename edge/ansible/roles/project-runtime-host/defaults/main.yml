@@ -1,0 +1,19 @@
+---
+project_runtime_packages:
+  - podman
+  - uidmap
+  - slirp4netns
+  - fuse-overlayfs
+  - dbus-user-session
+  - containernetworking-plugins
+  - curl
+
+project_runtime_directories:
+  - path: /srv/projects
+    mode: "0755"
+  - path: /srv/project-secrets
+    mode: "0750"
+  - path: /srv/project-state
+    mode: "0755"
+
+project_runtime_report_path: /usr/local/bin/project-runtime-report

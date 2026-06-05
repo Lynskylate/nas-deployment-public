@@ -1,0 +1,248 @@
+---
+# Deploy Mihomo to Aliyun Server with Envoy Integration
+# Usage: ansible-playbook -i inventory-aliyun.ini deploy-aliyun.yml
+
+- name: Deploy Mihomo to Aliyun Server
+  hosts: aliyun_server
+  become: true
+
+  pre_tasks:
+    - name: Display deployment info
+      ansible.builtin.debug:
+        msg:
+          - "Deploying Mihomo {{ mihomo_version }} to: {{ inventory_hostname }}"
+          - "Mihomo Port: 127.0.0.1:{{ mihomo_mixed_port }}"
+          - "API Port: {{ mihomo_external_controller }}"
+          - "Envoy Auth: {{ proxy_auth_username }}"
+
+    - name: Check sudo NOPASSWD
+      ansible.builtin.command: sudo -n whoami
+      register: sudo_check
+      changed_when: false
+      failed_when: false
+
+    - name: Fail if sudo NOPASSWD not configured
+      ansible.builtin.fail:
+        msg: |
+          ERROR: NOPASSWD sudo not configured for {{ ansible_user }}
+          Please run: echo "{{ ansible_user }} ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/{{ ansible_user }}
+      when: sudo_check.rc != 0
+
+  roles:
+    - role: mihomo
+
+  tasks:
+    # Override mihomo config with aliyun-specific template
+    - name: Deploy aliyun-specific mihomo configuration
+      ansible.builtin.template:
+        src: roles/mihomo/templates/config-aliyun.yaml.j2
+        dest: "{{ mihomo_config_path }}/config.yaml"
+        mode: '0640'
+        owner: mihomo
+        group: mihomo
+      notify: restart mihomo
+    - name: Install required packages
+      ansible.builtin.apt:
+        name:
+          - jq
+          - apache2-utils
+        state: present
+        update_cache: true
+
+    - name: Create log directory
+      ansible.builtin.file:
+        path: "{{ mihomo_log_path }}"
+        state: directory
+        owner: mihomo
+        group: mihomo
+        mode: '0750'
+
+    - name: Deploy htpasswd file for Envoy authentication
+      ansible.builtin.template:
+        src: roles/mihomo/templates/htpasswd.j2
+        dest: /etc/envoy/htpasswd
+        mode: '0644'
+        owner: root
+        group: root
+
+    - name: Ensure backup directory exists
+      ansible.builtin.file:
+        path: "{{ envoy_backup_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Backup existing Envoy configuration
+      ansible.builtin.copy:
+        src: "{{ envoy_config_file }}"
+        dest: "{{ envoy_backup_dir }}/envoy.yaml.backup-{{ ansible_date_time.epoch }}"
+        mode: '0644'
+        remote_src: true
+
+    - name: Copy updated Envoy configuration with Mihomo integration
+      ansible.builtin.template:
+        src: ../envoy/envoy-aliyun.yaml.j2
+        dest: "{{ envoy_config_file }}"
+        mode: '0644'
+        owner: root
+        group: root
+
+    - name: Validate Envoy configuration
+      ansible.builtin.command: envoy -c {{ envoy_config_file }} --mode validate
+      register: envoy_validate
+      changed_when: false
+
+    - name: Start mihomo service
+      ansible.builtin.systemd:
+        name: mihomo
+        state: started
+        enabled: true
+
+    - name: Restart Envoy service
+      ansible.builtin.systemd:
+        name: envoy
+        state: restarted
+
+    - name: Create Envoy log directory
+      ansible.builtin.file:
+        path: /var/log/envoy
+        state: directory
+        owner: envoy
+        group: envoy
+        mode: '0755'
+
+    - name: Create Vector user
+      ansible.builtin.user:
+        name: vector
+        system: true
+        shell: /usr/sbin/nologin
+        create_home: false
+        state: present
+
+    - name: Check if Vector is installed
+      ansible.builtin.stat:
+        path: /usr/local/bin/vector
+      register: vector_binary
+
+    - name: Download Vector to local machine
+      delegate_to: localhost
+      become: false
+      ansible.builtin.get_url:
+        url: "https://github.com/vectordotdev/vector/releases/download/{{ vector_version }}/vector-{{ vector_version }}-x86_64-unknown-linux-gnu.tar.gz"
+        dest: /tmp/vector.tar.gz
+        mode: '0644'
+      when: not vector_binary.stat.exists
+
+    - name: Extract Vector binary locally
+      delegate_to: localhost
+      become: false
+      ansible.builtin.shell: |
+        cd /tmp && tar -xzf vector.tar.gz
+      args:
+        creates: /tmp/vector-x86_64-unknown-linux-gnu/bin/vector
+      when: not vector_binary.stat.exists
+
+    - name: Copy Vector binary to remote
+      ansible.builtin.copy:
+        src: /tmp/vector-x86_64-unknown-linux-gnu/bin/vector
+        dest: /usr/local/bin/vector
+        mode: '0755'
+        owner: root
+        group: root
+      when: not vector_binary.stat.exists
+
+    - name: Copy Vector systemd service file
+      ansible.builtin.copy:
+        src: /tmp/vector-x86_64-unknown-linux-gnu/etc/systemd/vector.service
+        dest: /etc/systemd/system/vector.service
+        mode: '0644'
+        owner: root
+        group: root
+        force: false
+      when: not vector_binary.stat.exists
+
+    - name: Fix Vector service binary path
+      ansible.builtin.lineinfile:
+        path: /etc/systemd/system/vector.service
+        regexp: '^ExecStart'
+        line: 'ExecStart=/usr/local/bin/vector'
+      notify: reload systemd
+
+    - name: Create Vector config directory
+      ansible.builtin.file:
+        path: /etc/vector
+        state: directory
+        mode: '0755'
+
+    - name: Deploy Vector configuration
+      ansible.builtin.template:
+        src: roles/mihomo/templates/vector.yaml.j2
+        dest: /etc/vector/vector.yaml
+        mode: '0644'
+      notify: restart vector
+
+    - name: Create Vector data directory
+      ansible.builtin.file:
+        path: /var/lib/vector
+        state: directory
+        owner: vector
+        group: vector
+        mode: '0755'
+
+    - name: Enable and start Vector service
+      ansible.builtin.systemd:
+        name: vector
+        state: started
+        enabled: true
+        daemon_reload: true
+
+  post_tasks:
+    - name: Wait for mihomo to start
+      ansible.builtin.wait_for:
+        port: 7890
+        host: 127.0.0.1
+        timeout: 30
+      become: false
+
+    - name: Wait for mihomo API to start
+      ansible.builtin.wait_for:
+        port: 9090
+        host: 127.0.0.1
+        timeout: 30
+      become: false
+
+    - name: Check mihomo service status
+      ansible.builtin.systemd:
+        name: mihomo
+      register: mihomo_status
+      become: false
+
+    - name: Check Envoy service status
+      ansible.builtin.systemd:
+        name: envoy
+      register: envoy_status
+      become: false
+
+    - name: Display deployment summary
+      ansible.builtin.debug:
+        msg:
+          - "Mihomo deployed and running"
+          - "Mihomo Status: {{ mihomo_status.status.ActiveState }}"
+          - "Envoy Status: {{ envoy_status.status.ActiveState }}"
+          - "Vector Status: {{ vector_status.status.ActiveState | default('running') }}"
+          - ""
+          - "Mihomo HTTP Proxy (local): 127.0.0.1:{{ mihomo_mixed_port }}"
+          - "Mihomo HTTP Proxy (public, with auth): 0.0.0.0:8888"
+          - "Mihomo API: {{ mihomo_external_controller }}"
+          - ""
+          - "Public Endpoints:"
+          - "  - Mihomo API (Bearer token): http://{{ ansible_default_ipv4.address }}/mihomo/"
+          - "  - HTTP Proxy (with auth): http://{{ ansible_default_ipv4.address }}:8888"
+          - ""
+          - "Monitoring (via Tailscale):"
+          - "  - Logs: {{ victorialogs_host }}:{{ victorialogs_port }}"
+          - "  - Traces: {{ victoriatrace_host }}:{{ victoriatrace_port }}"
+          - ""
+          - "Proxy Authentication: enabled via private runtime overlay"
+          - ""
+          - "Usage examples:"
+          - "  See private runbook for authenticated API and proxy examples."

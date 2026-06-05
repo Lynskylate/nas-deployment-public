@@ -1,0 +1,90 @@
+---
+- name: Assert K3s agent join settings are provided
+  ansible.builtin.assert:
+    that:
+      - k3s_server_url is defined
+      - k3s_server_url | length > 0
+      - k3s_cluster_token is defined
+      - k3s_cluster_token | length > 0
+    fail_msg: "k3s_server_url and k3s_cluster_token must be provided before deploying K3s agents"
+  no_log: true
+
+- name: Read agent Tailscale IPv4 address
+  ansible.builtin.command: tailscale ip -4
+  register: k3s_agent_tailscale_ip_cmd
+  changed_when: false
+
+- name: Derive effective K3s agent node IP
+  ansible.builtin.set_fact:
+    k3s_agent_effective_ip: "{{ k3s_agent_tailscale_ip_cmd.stdout_lines[0] }}"
+
+- name: Ensure K3s agent config directory exists
+  ansible.builtin.file:
+    path: "{{ k3s_agent_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Render K3s agent config
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: "{{ k3s_agent_config_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+  notify: restart k3s agent
+
+- name: Download K3s installer
+  ansible.builtin.get_url:
+    url: "{{ k3s_install_script_url }}"
+    dest: "{{ k3s_install_script_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+  environment: "{{ {'http_proxy': github_download_proxy, 'https_proxy': github_download_proxy} if (github_download_proxy | default('') | length > 0) else {} }}"
+
+- name: Check if K3s binary exists
+  ansible.builtin.stat:
+    path: /usr/local/bin/k3s
+  register: k3s_agent_binary
+
+- name: Check if K3s agent service exists
+  ansible.builtin.stat:
+    path: "{{ k3s_agent_service_path }}"
+  register: k3s_agent_service
+
+- name: Install K3s agent
+  ansible.builtin.shell: |
+    set -euo pipefail
+    INSTALL_K3S_CHANNEL="{{ k3s_channel }}" \
+    K3S_URL="{{ k3s_server_url }}" \
+    K3S_TOKEN="{{ k3s_cluster_token }}" \
+    INSTALL_K3S_EXEC="agent" \
+    sh "{{ k3s_install_script_path }}"
+  args:
+    executable: /bin/bash
+  environment: "{{ {'http_proxy': github_download_proxy, 'https_proxy': github_download_proxy} if (github_download_proxy | default('') | length > 0) else {} }}"
+  when: not k3s_agent_binary.stat.exists or not k3s_agent_service.stat.exists
+
+- name: Flush K3s agent handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure K3s agent is enabled and started
+  ansible.builtin.systemd:
+    name: "{{ k3s_agent_service_name }}"
+    daemon_reload: true
+    enabled: true
+    state: started
+
+- name: Read K3s agent state
+  ansible.builtin.command: systemctl is-active {{ k3s_agent_service_name }}
+  register: k3s_agent_state
+  changed_when: false
+
+- name: Show K3s agent deployment summary
+  ansible.builtin.debug:
+    msg:
+      - "host={{ inventory_hostname }}"
+      - "k3s_agent_ip={{ k3s_agent_effective_ip }}"
+      - "k3s_agent_state={{ k3s_agent_state.stdout }}"

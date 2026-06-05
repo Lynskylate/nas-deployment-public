@@ -1,0 +1,13 @@
+apiVersion: 1
+providers:
+  - name: gtr-local-dashboards
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    editable: true
+    allowUiUpdates: true
+    updateIntervalSeconds: 30
+    options:
+      path: /usr/local/grafana/data/provisioned-dashboards
+      foldersFromFilesStructure: false

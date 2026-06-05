@@ -1,0 +1,71 @@
+---
+# Envoy Configuration for Mihomo Integration on Aliyun
+# Add these sections to /etc/envoy/envoy.yaml
+# These configurations add:
+# 1. HTTP Basic Authentication filter
+# 2. Routes for Mihomo API (/mihomo/*)
+# 3. Routes for Mihomo Proxy (/proxy/*)
+
+# Add this to http_filters in the listener configuration
+http_filters:
+  # Basic Authentication Filter
+  - name: envoy.filters.http.basic_auth
+    typed_config:
+      "@type": type.googleapis.com/envoy.extensions.filters.http.basic_auth.v3.BasicAuth
+      users:
+        inline_string: "/etc/envoy/htpasswd"
+
+  - name: envoy.filters.http.router
+    typed_config:
+      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+# Add these to virtual_hosts routes section in the listener
+routes:
+  # Mihomo API route (requires authentication)
+  - match:
+      prefix: "/mihomo/"
+    route:
+      cluster: mihomo_api
+    typed_per_filter_config:
+      envoy.filters.http.basic_auth:
+        "@type": type.googleapis.com/envoy.extensions.filters.http.basic_auth.v3.BasicAuthPerRoute
+
+  # Mihomo Proxy route (requires authentication)
+  - match:
+      prefix: "/proxy/"
+    route:
+      prefix_rewrite: "/"
+      cluster: mihomo_proxy
+    typed_per_filter_config:
+      envoy.filters.http.basic_auth:
+        "@type": type.googleapis.com/envoy.extensions.filters.http.basic_auth.v3.BasicAuthPerRoute
+
+# Add these to the clusters section
+clusters:
+  # Mihomo API Cluster
+  - name: mihomo_api
+    type: STRICT_DNS
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: mihomo_api
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: 127.0.0.1
+                port_value: 9090
+
+  # Mihomo Proxy Cluster
+  - name: mihomo_proxy
+    type: STRICT_DNS
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: mihomo_proxy
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: 127.0.0.1
+                port_value: 7890

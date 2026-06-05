@@ -1,0 +1,29 @@
+---
+# Envoy Static Configuration for Shadow-TLS + Monitoring
+node:
+  id: {{ inventory_hostname }}-local
+  cluster: shadowsocks-cluster
+
+admin:
+  access_log_path: {{ envoy_log_path }}/admin_access.log
+  profile_path: {{ envoy_log_path }}/envoy.prof
+  address:
+    socket_address:
+      address: 127.0.0.1
+      port_value: {{ envoy_admin_port }}
+
+dynamic_resources:
+  lds_config:
+    path_config_source:
+      path: /etc/envoy/dynamic_config/lds.yaml
+  cds_config:
+    path_config_source:
+      path: /etc/envoy/dynamic_config/cds.yaml
+
+# Overload manager for resource protection
+overload_manager:
+  resource_monitors:
+    - name: "envoy.resource_monitors.fixed_heap"
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.resource_monitors.fixed_heap.v3.FixedHeapConfig
+        max_heap_size_bytes: 2147483648  # 2GB

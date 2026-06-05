@@ -1,0 +1,54 @@
+---
+# Envoy Listener Discovery Service (LDS) Configuration
+# Defines TLS router on port 443 with SNI-based routing
+
+resources:
+  - "@type": type.googleapis.com/envoy.config.listener.v3.Listener
+    name: listener_443
+    address:
+      socket_address:
+        address: 0.0.0.0
+        port_value: 443
+    listener_filters:
+      - name: envoy.filters.listener.tls_inspector
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.listener.tls_inspector.v3.TlsInspector
+    filter_chains:
+      # SNI-based routing: shadow-tls traffic
+      - filter_chain_match:
+          server_names: ["{{ shadowtls_sni_server }}", "*.microsoft.com"]
+        transport_socket:
+          name: envoy.transport_sockets.raw_buffer
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.transport_sockets.raw_buffer.v3.RawBuffer
+        filters:
+          - name: envoy.filters.network.tcp_proxy
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
+              stat_prefix: shadow_tls_passthrough
+              cluster: shadow_tls_server
+      # Default HTTP routing for metrics endpoints
+      - filter_chain_match: {}
+        filters:
+          - name: envoy.filters.network.http_connection_manager
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+              stat_prefix: ingress_http
+              route_config:
+                name: local_route
+                virtual_hosts:
+                  - name: backend
+                    domains: ["*"]
+                    routes:
+                      - match:
+                          path: /metrics
+                        route:
+                          cluster: node_exporter
+                      - match:
+                          prefix: /envoy_admin
+                        route:
+                          cluster: envoy_admin
+              http_filters:
+                - name: envoy.filters.http.router
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router

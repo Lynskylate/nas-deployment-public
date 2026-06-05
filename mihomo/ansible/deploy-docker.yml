@@ -1,0 +1,43 @@
+---
+# Deploy Docker Cleanup Configuration to GTR
+# Usage: ansible-playbook -i inventory.ini deploy-docker.yml
+
+- name: Deploy Docker Cleanup to GTR
+  hosts: client_server
+  become: true
+
+  pre_tasks:
+    - name: Display deployment info
+      ansible.builtin.debug:
+        msg:
+          - "Target: {{ inventory_hostname }}"
+          - "Goal: Eliminate Docker nftables conflicts"
+          - "Snap Docker: disable"
+          - "System Docker: iptables=false"
+          - "Bridge NAT: Ansible-managed"
+
+  roles:
+    - role: docker-cleanup
+
+  post_tasks:
+    - name: Display nftables POSTROUTING chain
+      ansible.builtin.shell: |
+        {{ nft_binary }} list chain ip nat POSTROUTING
+      register: nft_output
+      changed_when: false
+
+    - name: Show POSTROUTING rules
+      ansible.builtin.debug:
+        msg:
+          - "nftables POSTROUTING:"
+          - "{{ nft_output.stdout_lines }}"
+
+    - name: Verify no snap docker process
+      ansible.builtin.shell: |
+        ps aux | grep -E "[d]ockerd" | grep snap || echo "snap docker: not running"
+      register: snap_check
+      changed_when: false
+
+    - name: Show snap docker status
+      ansible.builtin.debug:
+        msg: "{{ snap_check.stdout_lines }}"

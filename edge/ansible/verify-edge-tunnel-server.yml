@@ -1,0 +1,33 @@
+---
+- name: Verify tunnel server stack on remote proxy
+  hosts: edge_remote_proxy
+  become: true
+
+  tasks:
+    - name: Check tunnel server services
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+      register: tunnel_services
+      loop:
+        - shadowsocks-server
+        - shadow-tls-server
+
+    - name: Assert tunnel server services are active
+      ansible.builtin.assert:
+        that:
+          - item.status.ActiveState == "active"
+        fail_msg: "Tunnel service {{ item.item }} is not active on {{ inventory_hostname }}"
+      loop: "{{ tunnel_services.results }}"
+
+    - name: Assert tunnel server ports are listening
+      ansible.builtin.shell: |
+        set -e
+        ss -tulnp | grep -q '127.0.0.1:{{ shadowsocks_server_port }}'
+        ss -tulnp | grep -q '127.0.0.1:{{ shadowtls_server_listen_port }}'
+      changed_when: false
+
+    - name: Verify public SNI tunnel entry on 443
+      ansible.builtin.shell: |
+        set -e
+        timeout 8 openssl s_client -connect 127.0.0.1:{{ shadowtls_tls_port }} -servername {{ shadowtls_sni_server }} < /dev/null | grep -q "Certificate chain"
+      changed_when: false

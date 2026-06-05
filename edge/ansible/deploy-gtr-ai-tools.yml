@@ -1,0 +1,7 @@
+---
+- name: Deploy AI coding tools and Slock daemon to GTR
+  hosts: gtr_core
+  become: true
+
+  roles:
+    - role: gtr-ai-tools

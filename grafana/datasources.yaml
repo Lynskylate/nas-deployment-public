@@ -1,0 +1,39 @@
+# Configuration file version
+apiVersion: 1
+
+# List of data sources to insert/update
+datasources:
+  # VictoriaMetrics - 时序指标数据
+  - name: VictoriaMetrics
+    type: prometheus
+    access: proxy
+    orgId: 1
+    uid: victoriametrics
+    url: http://localhost:8428
+    isDefault: true
+    editable: true
+    jsonData:
+      timeInterval: 15s
+      httpMethod: POST
+
+  # VictoriaLogs - 日志数据
+  - name: VictoriaLogs
+    type: victoriametrics-logs-datasource
+    access: proxy
+    orgId: 1
+    uid: victorialogs
+    url: http://localhost:8429
+    isDefault: false
+    editable: true
+    jsonData:
+      timeInterval: 15s
+
+  # VictoriaTraces - 分布式追踪数据（Jaeger 兼容 API）
+  - name: VictoriaTraces
+    type: jaeger
+    access: proxy
+    orgId: 1
+    uid: victoriatraces
+    url: http://localhost:9428/select/jaeger
+    isDefault: false
+    editable: true

@@ -1,0 +1,26 @@
+---
+- name: Deploy tunnel server stack (Shadow-TLS + Shadowsocks) to remote proxy
+  hosts: edge_remote_proxy
+  become: true
+
+  roles:
+    - role: shadowsocks-server
+    - role: shadowtls-server
+
+  post_tasks:
+    - name: Ensure tunnel server services are running
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: started
+        enabled: true
+      loop:
+        - shadowsocks-server
+        - shadow-tls-server
+
+    - name: Display tunnel server summary
+      ansible.builtin.debug:
+        msg:
+          - "Tunnel server host: {{ inventory_hostname }}"
+          - "SS server: 127.0.0.1:{{ shadowsocks_server_port }}"
+          - "Shadow-TLS server: 127.0.0.1:{{ shadowtls_server_listen_port }}"
+          - "Public entry via edge-proxy: 0.0.0.0:{{ shadowtls_tls_port }}"

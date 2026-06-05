@@ -1,0 +1,4 @@
+---
+- name: reload k3s sysctl
+  ansible.builtin.command: sysctl --system
+  changed_when: false

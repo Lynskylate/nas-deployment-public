@@ -1,0 +1,28 @@
+{
+  "period_label": "H1 2025",
+  "period_end": "2025-06-30",
+  "accounting_standard": "HKFRS",
+  "currency": "HKD",
+  "is_interim": true,
+  "metrics": {
+    "cash_and_equivalents": 1915000000,
+    "short_term_investments": 132000000,
+    "term_deposits": 360000000,
+    "total_liabilities": 1450000000,
+    "short_term_debt": 160000000,
+    "long_term_debt": 185000000,
+    "accounts_receivable": 438000000,
+    "inventory": 272000000,
+    "other_current_assets": 215000000,
+    "operating_cash_flow": 176000000,
+    "capital_expenditure": 29000000,
+    "net_income": 128000000,
+    "restricted_cash": 47000000,
+    "total_assets": 3710000000,
+    "goodwill": 230000000,
+    "intangible_assets": 147000000,
+    "equity": 2260000000,
+    "revenue": 1045000000,
+    "sga_expense": 169000000
+  }
+}

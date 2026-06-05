@@ -1,0 +1,91 @@
+---
+- name: Deploy Network Connectivity Monitoring
+  hosts: monitoring_servers
+  become: yes
+  vars:
+    monitor_dir: /usr/local/network-monitor
+    log_dir: /var/log/network-monitor
+    proxy_port: 7890
+    monitor_interval: 1  # minutes
+
+  tasks:
+    - name: Create network monitor directory
+      ansible.builtin.file:
+        path: "{{ monitor_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create log directory
+      ansible.builtin.file:
+        path: "{{ log_dir }}"
+        state: directory
+        mode: '0755'
+        owner: root
+        group: root
+
+    - name: Copy network monitor script
+      ansible.builtin.copy:
+        src: ../network-monitor.sh
+        dest: "{{ monitor_dir }}/network-monitor.sh"
+        mode: '0755'
+
+    - name: Copy network monitor wrapper script
+      ansible.builtin.copy:
+        src: ../network-monitor-wrapper.sh
+        dest: "{{ monitor_dir }}/network-monitor-wrapper.sh"
+        mode: '0755'
+
+    - name: Backup existing Vector configuration
+      ansible.builtin.copy:
+        src: /etc/vector/vector.yaml
+        dest: /etc/vector/vector.yaml.backup
+        remote_src: yes
+        backup: yes
+      ignore_errors: yes
+
+    - name: Copy updated Vector configuration
+      ansible.builtin.copy:
+        src: ../vector.yaml
+        dest: /etc/vector/vector.yaml
+        mode: '0644'
+        owner: vector
+        group: vector
+      notify: restart vector
+
+    - name: Create initial empty log file
+      ansible.builtin.file:
+        path: "{{ log_dir }}/network-monitor.log"
+        state: touch
+        mode: '0644'
+        owner: root
+        group: root
+
+    - name: Set up cron job for network monitoring
+      ansible.builtin.cron:
+        name: "Network Connectivity Monitor"
+        minute: "*/{{ monitor_interval }}"
+        job: "{{ monitor_dir }}/network-monitor-wrapper.sh >/dev/null 2>&1"
+        user: root
+        state: present
+
+    - name: Configure logrotate for network monitor logs
+      ansible.builtin.copy:
+        content: |
+          {{ log_dir }}/*.log {
+              daily
+              rotate 7
+              compress
+              delaycompress
+              missingok
+              notifempty
+              create 0644 root root
+          }
+        dest: /etc/logrotate.d/network-monitor
+        mode: '0644'
+
+  handlers:
+    - name: restart vector
+      ansible.builtin.systemd:
+        name: vector
+        state: restarted
+        enabled: yes

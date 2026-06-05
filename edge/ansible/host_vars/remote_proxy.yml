@@ -1,0 +1,26 @@
+---
+
+# Overseas node: direct GitHub access, no proxy needed
+github_download_proxy: ""
+
+cleanup_legacy_proxy: false
+edge_tunnel_server_enabled: true
+
+envoy_domain_routes:
+  - name: node_exporter_metrics
+    mode: http_plaintext
+    path_prefix: "/metrics"
+    cluster: node_exporter
+  - name: envoy_admin_metrics
+    mode: http_plaintext
+    path_prefix: "/stats/prometheus"
+    cluster: envoy_admin
+  - name: shadowtls_passthrough
+    mode: tls_passthrough
+    sni_domains:
+      - "www.microsoft.com"
+      - "*.microsoft.com"
+    cluster: shadow_tls_server
+
+# Remote proxy ships edge logs to GTR VictoriaLogs through Tailscale.
+edge_vector_sink_type: "victorialogs"

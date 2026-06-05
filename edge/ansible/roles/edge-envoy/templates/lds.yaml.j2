@@ -1,0 +1,166 @@
+---
+{% set passthrough_routes = envoy_domain_routes | selectattr('mode', 'equalto', 'tls_passthrough') | list %}
+{% set terminate_routes = envoy_domain_routes | selectattr('mode', 'equalto', 'tls_terminate_http') | list %}
+{% set plaintext_routes = envoy_domain_routes | selectattr('mode', 'equalto', 'http_plaintext') | list %}
+resources:
+  - "@type": type.googleapis.com/envoy.config.listener.v3.Listener
+    name: listener_{{ envoy_listener_port }}
+    address:
+      socket_address:
+        address: 0.0.0.0
+        port_value: {{ envoy_listener_port }}
+    listener_filters:
+      - name: envoy.filters.listener.tls_inspector
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.listener.tls_inspector.v3.TlsInspector
+    filter_chains:
+{% for route in passthrough_routes %}
+      - filter_chain_match:
+          server_names: {{ route.sni_domains | to_json }}
+        filters:
+          - name: envoy.filters.network.tcp_proxy
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
+              stat_prefix: {{ route.name | default('tls_passthrough') }}
+              cluster: {{ route.cluster }}
+{% endfor %}
+{% for route in terminate_routes %}
+      - filter_chain_match:
+          server_names: {{ route.sni_domains | to_json }}
+        transport_socket:
+          name: envoy.transport_sockets.tls
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+            common_tls_context:
+              tls_certificates:
+                - certificate_chain:
+                    filename: {{ route.cert_path }}
+                  private_key:
+                    filename: {{ route.key_path }}
+        filters:
+          - name: envoy.filters.network.http_connection_manager
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+              stat_prefix: {{ route.name | default('tls_terminate_http') }}
+              access_log:
+                - name: envoy.access_loggers.file
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.access_loggers.file.v3.FileAccessLog
+                    path: {{ envoy_log_path }}/access.log
+              route_config:
+                name: {{ route.name | default('tls_route') }}
+                virtual_hosts:
+                  - name: {{ route.name | default('tls_vhost') }}
+                    domains: {{ route.host_domains | default(route.sni_domains) | to_json }}
+                    routes:
+                      - match:
+                          prefix: "{{ route.path_prefix | default('/') }}"
+                        route:
+                          cluster: {{ route.cluster }}
+{% if route.prefix_rewrite is defined %}
+                          prefix_rewrite: "{{ route.prefix_rewrite }}"
+{% endif %}
+                      - match:
+                          prefix: "/"
+                        direct_response:
+                          status: 404
+              http_filters:
+                - name: envoy.filters.http.router
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+{% endfor %}
+      - filter_chain_match:
+          empty_filter_chain_match: {}
+        filters:
+          - name: envoy.filters.network.http_connection_manager
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+              stat_prefix: edge_plain_http
+              access_log:
+                - name: envoy.access_loggers.file
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.access_loggers.file.v3.FileAccessLog
+                    path: {{ envoy_log_path }}/access.log
+              route_config:
+                name: edge_plain_route
+                virtual_hosts:
+                  - name: edge_plain_vhost
+                    domains: ["*"]
+                    routes:
+{% if plaintext_routes | length > 0 %}
+{% for route in plaintext_routes %}
+                      - match:
+                          prefix: "{{ route.path_prefix | default('/metrics') }}"
+                        route:
+                          cluster: {{ route.cluster }}
+{% if route.prefix_rewrite is defined %}
+                          prefix_rewrite: "{{ route.prefix_rewrite }}"
+{% endif %}
+{% endfor %}
+{% else %}
+                      - match:
+                          prefix: "/metrics"
+                        route:
+                          cluster: envoy_admin
+                          prefix_rewrite: "/stats/prometheus"
+{% endif %}
+                      - match:
+                          prefix: "/"
+                        direct_response:
+                          status: 404
+              http_filters:
+                - name: envoy.filters.http.router
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+{% if envoy_http_listener_enabled | bool %}
+  - "@type": type.googleapis.com/envoy.config.listener.v3.Listener
+    name: listener_{{ envoy_http_listener_port }}
+    address:
+      socket_address:
+        address: 0.0.0.0
+        port_value: {{ envoy_http_listener_port }}
+    filter_chains:
+      - filter_chain_match:
+          empty_filter_chain_match: {}
+        filters:
+          - name: envoy.filters.network.http_connection_manager
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+              stat_prefix: edge_http_{{ envoy_http_listener_port }}
+              access_log:
+                - name: envoy.access_loggers.file
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.access_loggers.file.v3.FileAccessLog
+                    path: {{ envoy_log_path }}/access.log
+              route_config:
+                name: edge_http_{{ envoy_http_listener_port }}_route
+                virtual_hosts:
+                  - name: edge_http_{{ envoy_http_listener_port }}_vhost
+                    domains: ["*"]
+                    routes:
+{% if plaintext_routes | length > 0 %}
+{% for route in plaintext_routes %}
+                      - match:
+                          prefix: "{{ route.path_prefix | default('/metrics') }}"
+                        route:
+                          cluster: {{ route.cluster }}
+{% if route.prefix_rewrite is defined %}
+                          prefix_rewrite: "{{ route.prefix_rewrite }}"
+{% endif %}
+{% endfor %}
+{% else %}
+                      - match:
+                          prefix: "/metrics"
+                        route:
+                          cluster: envoy_admin
+                          prefix_rewrite: "/stats/prometheus"
+{% endif %}
+                      - match:
+                          prefix: "/"
+                        direct_response:
+                          status: 404
+              http_filters:
+                - name: envoy.filters.http.router
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+{% endif %}

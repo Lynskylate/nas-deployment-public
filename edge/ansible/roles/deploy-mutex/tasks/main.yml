@@ -1,0 +1,33 @@
+---
+# deploy-mutex: 部署互斥锁
+# 防止 Ansible 和 deployctl 同时执行破坏性操作
+
+- name: Install deploy mutex systemd units
+  ansible.builtin.template:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - deploy-mutex.target
+    - deploy-mutex-busy.target
+  notify: reload systemd
+
+- name: Install deploy-lock helper script
+  ansible.builtin.template:
+    src: deploy-lock.sh.j2
+    dest: /usr/local/bin/deploy-lock
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Verify deploy-lock is executable
+  ansible.builtin.command: deploy-lock status
+  register: lock_status
+  changed_when: false
+  failed_when: false
+
+- name: Report deploy mutex status
+  ansible.builtin.debug:
+    msg: "Deploy mutex installed. Current status: {{ lock_status.stdout | default('idle') }}"

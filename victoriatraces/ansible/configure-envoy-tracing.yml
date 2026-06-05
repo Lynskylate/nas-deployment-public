@@ -1,0 +1,48 @@
+---
+# Configure Envoy tracing to send traces to VictoriaTraces
+# Usage: ansible-playbook -i inventory.ini configure-envoy-tracing.yml
+
+- name: Configure Envoy Tracing for VictoriaTraces
+  hosts: gtr
+  become: true
+
+  pre_tasks:
+    - name: Display configuration info
+      ansible.builtin.debug:
+        msg:
+          - "Configuring Envoy to send traces to VictoriaTraces"
+          - "VictoriaTraces gRPC endpoint: 127.0.0.1:{{ victoriatraces_grpc_port }}"
+
+  roles:
+    - role: envoy-tracing
+
+  post_tasks:
+    - name: Verify Envoy is running
+      ansible.builtin.systemd:
+        name: envoy
+        state: started
+
+    - name: Send test requests
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:80/test{{ item }}"
+        method: GET
+        return_content: true
+      loop:
+        - "1"
+        - "2"
+        - "3"
+      register: test_requests
+      ignore_errors: true
+
+    - name: Display test results
+      ansible.builtin.debug:
+        msg: "Test request {{ item.item }}: {{ item.status | default('failed') }}"
+      loop: "{{ test_requests.results }}"
+      when: test_requests is defined
+
+    - name: Display configuration summary
+      ansible.builtin.debug:
+        msg:
+          - "Envoy tracing configured successfully"
+          - "Traces will be sent to VictoriaTraces at 127.0.0.1:{{ victoriatraces_grpc_port }}"
+          - "View traces at: http://{{ inventory_hostname }}:9428/vmui"

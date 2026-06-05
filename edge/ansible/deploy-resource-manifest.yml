@@ -1,0 +1,40 @@
+---
+# deploy-resource-manifest.yml — 将基础设施 manifest 部署到 GTR
+# 用法: ansible-playbook -i inventory-edge.ini deploy-resource-manifest.yml
+#
+# 这会把 .resource-manifest.yml 复制到 GTR 的 /etc/gtr/ 下
+# deployctl 部署时会 SSH 读取这个文件做交叉验证
+
+- name: Deploy resource manifest to GTR
+  hosts: gtr_core
+  become: true
+
+  tasks:
+    - name: Ensure /etc/gtr directory exists
+      ansible.builtin.file:
+        path: /etc/gtr
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Copy infrastructure resource manifest
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../.resource-manifest.yml"
+        dest: /etc/gtr/resource-manifest.infra.yml
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Verify manifest is valid YAML
+      ansible.builtin.command: python3 -c "import yaml; yaml.safe_load(open('/etc/gtr/resource-manifest.infra.yml'))"
+      changed_when: false
+
+    - name: Report deployed manifest
+      ansible.builtin.command: cat /etc/gtr/resource-manifest.infra.yml
+      register: manifest_content
+      changed_when: false
+
+    - name: Show manifest summary
+      ansible.builtin.debug:
+        msg: "Infrastructure manifest deployed. Ports: {{ manifest_content.stdout | regex_findall('port: \\d+') | length }}"

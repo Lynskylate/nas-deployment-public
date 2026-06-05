@@ -1,0 +1,121 @@
+---
+- name: Verify edge baseline
+  hosts: edge_hosts
+  become: true
+
+  tasks:
+    - name: Check required services
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+      register: edge_services
+      loop:
+        - node_exporter
+        - tailscaled
+        - envoy
+
+    - name: Assert required services are active
+      ansible.builtin.assert:
+        that:
+          - item.status.ActiveState == "active"
+        fail_msg: "Service {{ item.item }} is not active on {{ inventory_hostname }}"
+      loop: "{{ edge_services.results }}"
+
+    - name: Check vector when enabled
+      ansible.builtin.systemd:
+        name: vector
+      register: vector_status
+      when: edge_vector_enabled | bool
+
+    - name: Assert vector is active when enabled
+      ansible.builtin.assert:
+        that:
+          - vector_status.status.ActiveState == "active"
+        fail_msg: "Vector is not active on {{ inventory_hostname }}"
+      when: edge_vector_enabled | bool
+
+    - name: Check edge ports
+      ansible.builtin.shell: |
+        set -e
+        ss -tulnp | grep -q ':{{ envoy_listener_port }} '
+        {% if envoy_http_listener_enabled | bool %}
+        ss -tulnp | grep -q ':{{ envoy_http_listener_port }} '
+        {% endif %}
+      changed_when: false
+
+    - name: Assert forbidden proxy ports are not listening
+      ansible.builtin.shell: |
+        if ss -tulnp | grep -Eq ':(1080|7890|8888)\b'; then
+          echo "forbidden edge proxy port detected"
+          exit 1
+        fi
+      changed_when: false
+
+    - name: Verify envoy local admin endpoint
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ envoy_admin_port }}/stats"
+        return_content: false
+
+    - name: Verify node_exporter endpoint
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ node_exporter_port }}/metrics"
+        return_content: false
+
+    - name: Verify metrics route through envoy
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ envoy_listener_port }}/metrics"
+        return_content: false
+
+    - name: Verify metrics route through envoy HTTP listener
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ envoy_http_listener_port }}/metrics"
+        return_content: false
+      when: envoy_http_listener_enabled | bool
+
+    - name: Assert envoy admin path is not exposed on public TLS listener
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ envoy_listener_port }}/envoy_admin"
+        status_code:
+          - 404
+        return_content: false
+
+    - name: Assert envoy admin path is not exposed on public HTTP listener
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ envoy_http_listener_port }}/envoy_admin"
+        status_code:
+          - 404
+        return_content: false
+      when: envoy_http_listener_enabled | bool
+
+    - name: Check tunnel server services on enabled hosts
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+      register: tunnel_services
+      loop:
+        - shadowsocks-server
+        - shadow-tls-server
+      when: edge_tunnel_server_enabled | bool
+
+    - name: Assert tunnel server services are active on enabled hosts
+      ansible.builtin.assert:
+        that:
+          - item.status.ActiveState == "active"
+        fail_msg: "Tunnel service {{ item.item }} is not active on {{ inventory_hostname }}"
+      loop: "{{ tunnel_services.results }}"
+      when: edge_tunnel_server_enabled | bool
+
+    - name: Assert tunnel server ports are listening on enabled hosts
+      ansible.builtin.shell: |
+        set -e
+        ss -tulnp | grep -q '127.0.0.1:{{ shadowsocks_server_port }}'
+        ss -tulnp | grep -q '127.0.0.1:{{ shadowtls_server_listen_port }}'
+      changed_when: false
+      when: edge_tunnel_server_enabled | bool
+
+    - name: Assert tunnel server ports are closed on disabled hosts
+      ansible.builtin.shell: |
+        if ss -tulnp | grep -Eq '127.0.0.1:({{ shadowsocks_server_port }}|{{ shadowtls_server_listen_port }})\b'; then
+          echo "tunnel server ports should not be open on this edge host"
+          exit 1
+        fi
+      changed_when: false
+      when: not (edge_tunnel_server_enabled | bool)

@@ -1,0 +1,28 @@
+{
+  "period_label": "FY2024",
+  "period_end": "2024-12-31",
+  "accounting_standard": "HKFRS",
+  "currency": "HKD",
+  "is_interim": false,
+  "metrics": {
+    "cash_and_equivalents": 1850000000,
+    "short_term_investments": 120000000,
+    "term_deposits": 350000000,
+    "total_liabilities": 1420000000,
+    "short_term_debt": 150000000,
+    "long_term_debt": 190000000,
+    "accounts_receivable": 420000000,
+    "inventory": 265000000,
+    "other_current_assets": 210000000,
+    "operating_cash_flow": 320000000,
+    "capital_expenditure": 52000000,
+    "net_income": 245000000,
+    "restricted_cash": 45000000,
+    "total_assets": 3650000000,
+    "goodwill": 230000000,
+    "intangible_assets": 150000000,
+    "equity": 2230000000,
+    "revenue": 1980000000,
+    "sga_expense": 335000000
+  }
+}

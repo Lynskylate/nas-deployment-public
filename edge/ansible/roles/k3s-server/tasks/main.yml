@@ -74,16 +74,27 @@
     enabled: true
     state: started
 
-- name: Wait for K3s API server
+- name: Wait for K3s API server port
   ansible.builtin.wait_for:
     host: 127.0.0.1
     port: 6443
     timeout: 90
 
+- name: Wait for K3s service to stabilize
+  ansible.builtin.shell: systemctl is-active --quiet {{ k3s_server_service_name }}
+  register: k3s_service_check
+  retries: 12
+  delay: 5
+  until: k3s_service_check.rc == 0
+  changed_when: false
+
 - name: Read K3s server nodes
   ansible.builtin.command: k3s kubectl get nodes --no-headers
   register: k3s_server_nodes
   changed_when: false
+  retries: 5
+  delay: 10
+  until: k3s_server_nodes.rc == 0
 
 - name: Show K3s server deployment summary
   ansible.builtin.debug:

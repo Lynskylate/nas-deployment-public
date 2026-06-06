@@ -256,6 +256,16 @@ jobs:
           vault_repo_ssh_key: ${{ secrets.VAULT_REPO_SSH_KEY }}
           sops_age_key: ${{ secrets.SOPS_AGE_KEY }}
 
+      - name: Connect Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ steps.bootstrap.outputs.ts_oauth_client_id }}
+          oauth-secret: ${{ steps.bootstrap.outputs.ts_oauth_secret }}
+          tags: tag:ci
+
+      - name: Add GTR host alias
+        run: echo "${{ env.GTR_TAILSCALE_IP }} gtr gtr.tail414c32.ts.net" | sudo tee -a /etc/hosts
+
       - name: Deploy edge baseline to ${{ matrix.target }}
         working-directory: edge/ansible
         run: ansible-playbook -i inventory-edge.ini deploy-edge.yml --limit ${{ matrix.target }} -v

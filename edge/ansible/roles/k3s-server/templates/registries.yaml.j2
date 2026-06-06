@@ -1,0 +1,10 @@
+{% if k3s_registry_mirrors is defined and k3s_registry_mirrors %}
+mirrors:
+{% for registry, endpoints in k3s_registry_mirrors.items() %}
+  {{ registry }}:
+    endpoint:
+{% for ep in endpoints %}
+      - "{{ ep }}"
+{% endfor %}
+{% endfor %}
+{% endif %}

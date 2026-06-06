@@ -2,11 +2,11 @@ gtr_expected_proxy_ports:
 - 1080
 - 7890
 github_download_proxy: http://127.0.0.1:7890
+k3s_containerd_http_proxy: "http://127.0.0.1:7890"
+k3s_containerd_https_proxy: "http://127.0.0.1:7890"
+k3s_node_labels:
+  gtr.io/region: cn
+  gtr.io/visibility: internal
 gtr_ai_user: lynskylate
 slock_ai_label: tiequn-misc
 slock_ai_server_url: https://api.slock.ai
-k3s_server_tailscale_ip: 100.121.0.67
-k3s_server_tls_sans:
-- gtr
-- gtr.tail414c32.ts.net
-- 100.121.0.67

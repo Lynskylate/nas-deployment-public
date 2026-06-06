@@ -27,8 +27,10 @@ jobs:
           cd edge/ansible
           ansible-playbook -i inventory-edge.ini deploy-edge.yml --syntax-check
           ansible-playbook -i inventory-edge.ini deploy-resource-manifest.yml --syntax-check
-          ansible-playbook -i inventory-edge.ini deploy-gtr-k3s-platform.yml --syntax-check
-          ansible-playbook -i inventory-edge.ini verify-gtr-k3s-platform.yml --syntax-check
+          ansible-playbook -i inventory-edge.ini deploy-gtr-k3s-server.yml --syntax-check
+          ansible-playbook -i inventory-edge.ini deploy-gtr-k3s-agent.yml --syntax-check
+          ansible-playbook -i inventory-edge.ini verify-gtr-k3s-server.yml --syntax-check
+          ansible-playbook -i inventory-edge.ini verify-gtr-k3s-agent.yml --syntax-check
           ansible-playbook -i inventory-edge.ini deploy-gtr-ai-tools.yml --syntax-check
           ansible-playbook -i inventory-edge.ini deploy-gtr-tunnel-client.yml --syntax-check
           ansible-playbook -i inventory-edge.ini deploy-edge-tunnel-server.yml --syntax-check

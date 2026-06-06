@@ -4,3 +4,7 @@ edge_tunnel_server_enabled: false
 
 # Tencent edge node ships edge logs to GTR VictoriaLogs through Tailscale.
 edge_vector_sink_type: "victorialogs"
+
+k3s_node_labels:
+  gtr.io/region: cn
+  gtr.io/visibility: public

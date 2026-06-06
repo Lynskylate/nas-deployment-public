@@ -35,9 +35,24 @@
     mode: "0600"
   notify: restart k3s agent
 
+- name: Render containerd registry mirrors
+  ansible.builtin.template:
+    src: registries.yaml.j2
+    dest: "/etc/rancher/k3s/registries.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+  when: k3s_registry_mirrors is defined and k3s_registry_mirrors
+  notify: restart k3s agent
+
+- name: Set K3s installer script URL
+  ansible.builtin.set_fact:
+    k3s_effective_install_script_url: >-
+      {{ (k3s_mirror == 'cn') | ternary('https://rancher-mirror.rancher.cn/k3s/k3s-install.sh', k3s_install_script_url) }}
+
 - name: Download K3s installer
   ansible.builtin.get_url:
-    url: "{{ k3s_install_script_url }}"
+    url: "{{ k3s_effective_install_script_url }}"
     dest: "{{ k3s_install_script_path }}"
     owner: root
     group: root
@@ -54,18 +69,56 @@
     path: "{{ k3s_agent_service_path }}"
   register: k3s_agent_service
 
+- name: Check K3s agent runtime health
+  ansible.builtin.shell: |
+    if ! systemctl is-active --quiet {{ k3s_agent_service_name }}; then
+      echo "not_running"
+    else
+      echo "healthy"
+    fi
+  register: k3s_agent_health
+  changed_when: false
+  failed_when: false
+
+- name: Determine if K3s agent installation is needed
+  ansible.builtin.set_fact:
+    k3s_agent_needs_install: >-
+      {{ not k3s_agent_binary.stat.exists
+         or not k3s_agent_service.stat.exists
+         or k3s_agent_health.stdout != 'healthy' }}
+
+- name: Build K3s agent install environment
+  ansible.builtin.set_fact:
+    k3s_agent_install_env: >-
+      {{ {'INSTALL_K3S_CHANNEL': k3s_channel,
+          'INSTALL_K3S_MIRROR': k3s_mirror,
+          'K3S_URL': k3s_server_url,
+          'K3S_TOKEN': k3s_cluster_token,
+          'INSTALL_K3S_EXEC': 'agent'}
+        | combine((k3s_mirror != 'cn') | ternary({'http_proxy': github_download_proxy, 'https_proxy': github_download_proxy}, {}))
+        | dict2items | rejectattr('value', 'equalto', '') | items2dict }}
+
 - name: Install K3s agent
   ansible.builtin.shell: |
     set -euo pipefail
-    INSTALL_K3S_CHANNEL="{{ k3s_channel }}" \
-    K3S_URL="{{ k3s_server_url }}" \
-    K3S_TOKEN="{{ k3s_cluster_token }}" \
-    INSTALL_K3S_EXEC="agent" \
     sh "{{ k3s_install_script_path }}"
   args:
     executable: /bin/bash
-  environment: "{{ {'http_proxy': github_download_proxy, 'https_proxy': github_download_proxy} if (github_download_proxy | default('') | length > 0) else {} }}"
-  when: not k3s_agent_binary.stat.exists or not k3s_agent_service.stat.exists
+  environment: "{{ k3s_agent_install_env }}"
+  when: k3s_agent_needs_install | bool
+
+- name: Configure containerd HTTP proxy for image pulling
+  ansible.builtin.blockinfile:
+    path: "/etc/systemd/system/{{ k3s_agent_service_name }}.service.env"
+    block: |
+      HTTP_PROXY={{ k3s_containerd_http_proxy }}
+      HTTPS_PROXY={{ k3s_containerd_https_proxy }}
+      NO_PROXY={{ k3s_containerd_no_proxy }}
+    marker: "# {mark} ANSIBLE MANAGED: containerd proxy"
+    create: true
+    mode: "0600"
+  when: k3s_containerd_http_proxy | default('') | length > 0
+  notify: restart k3s agent
 
 - name: Flush K3s agent handlers
   ansible.builtin.meta: flush_handlers
@@ -88,3 +141,5 @@
       - "host={{ inventory_hostname }}"
       - "k3s_agent_ip={{ k3s_agent_effective_ip }}"
       - "k3s_agent_state={{ k3s_agent_state.stdout }}"
+      - "health={{ k3s_agent_health.stdout | default('unknown') }}"
+      - "needs_install={{ k3s_agent_needs_install | default(true) }}"

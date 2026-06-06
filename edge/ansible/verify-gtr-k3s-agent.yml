@@ -1,0 +1,22 @@
+---
+- name: Verify K3s agents on GTR and tencent
+  hosts: gtr_core:edge_tencent
+  become: true
+
+  tasks:
+    - name: Check k3s-agent service state
+      ansible.builtin.command: systemctl is-active k3s-agent
+      register: k3s_agent_state
+      changed_when: false
+
+    - name: Read tailscale IPv4 address
+      ansible.builtin.command: tailscale ip -4
+      register: k3s_agent_tailscale_ip
+      changed_when: false
+
+    - name: Show K3s agent summary
+      ansible.builtin.debug:
+        msg:
+          - "host={{ inventory_hostname }}"
+          - "k3s-agent={{ k3s_agent_state.stdout }}"
+          - "tailscale_ip={{ k3s_agent_tailscale_ip.stdout_lines[0] | default('missing') }}"

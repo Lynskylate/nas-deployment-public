@@ -2,6 +2,7 @@
 
 # Overseas node: direct GitHub access, no proxy needed
 github_download_proxy: ""
+k3s_mirror: ""
 
 cleanup_legacy_proxy: false
 edge_tunnel_server_enabled: true

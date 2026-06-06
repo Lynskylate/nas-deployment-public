@@ -12,6 +12,7 @@ k3s_prereq_packages:
 k3s_prereq_modules:
   - overlay
   - br_netfilter
+  - wireguard
 
 k3s_prereq_sysctls:
   net.bridge.bridge-nf-call-iptables: 1

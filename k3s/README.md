@@ -21,11 +21,14 @@ This directory tracks the platform migration from the legacy Podman release flow
 | **Server** (control-plane) | aliyun | 100.102.140.59 |
 | Agent | gtr | 100.121.0.67 |
 | Agent | tencent | 100.99.48.76 |
+| Agent | remote_proxy | 100.66.156.40 |
 
 - API server URL: `https://100.102.140.59:6443`
 - Cluster CIDR: `10.60.0.0/16`, Service CIDR: `10.61.0.0/16`
-- Flannel backend: `tailscale0` (host Tailscale mesh)
-- Built-ins disabled: `traefik`, `servicelb` (replaced by Tailscale Operator in next phase)
+- Flannel backend: `wireguard-native` (kernel WireGuard, no tailscale0 dependency)
+- Built-ins disabled: `cloud-controller-manager`, `traefik`, `servicelb`
+- Node labels: `gtr.io/region` (`cn`/`us`), `gtr.io/visibility` (`public`/`internal`)
+- Container image pull proxy: GTR mihomo (`gtr.tail414c32.ts.net:7890`), GTR uses localhost
 
 ## Deployment
 
@@ -52,6 +55,32 @@ The CI workflow (`deploy-infra.yml`) runs server and agents in separate jobs:
 Both server and agent roles check runtime health before deciding whether to install:
 - **Healthy** (systemctl active + API reachable): skip install, only render config + ensure started
 - **Not healthy / missing**: perform full install
+
+### Install Source (`k3s_mirror`)
+
+All nodes default to `k3s_mirror: "cn"` (`group_vars/all/public.yml`), which uses the Rancher CN mirror for faster binary downloads inside China:
+
+| Mirror | Install script | Binary source |
+|--------|---------------|---------------|
+| `cn` | `https://rancher-mirror.rancher.cn/k3s/k3s-install.sh` | `rancher-mirror.rancher.cn/k3s/<version>/k3s-amd64` |
+| `""` (empty) | `https://get.k3s.io` | `github.com/k3s-io/k3s/releases` |
+
+When `k3s_mirror: "cn"`:
+- Install script is downloaded from the Rancher mirror
+- `INSTALL_K3S_MIRROR=cn` is set, directing the script to download the binary from the CN mirror
+- Proxy settings (`http_proxy`/`https_proxy`) are **not** passed to the install step, since the mirror is directly reachable
+
+When `k3s_mirror: ""` (overseas nodes like remote_proxy):
+- Install script comes from `get.k3s.io`
+- Binary downloads from GitHub releases
+- Proxy is used if `github_download_proxy` is set for the host
+
+| Node | `k3s_mirror` | `github_download_proxy` |
+|------|------------|---------------------|
+| aliyun | `cn` | `gtr:7890` (unused by k3s) |
+| gtr | `cn` | `127.0.0.1:7890` (unused by k3s) |
+| tencent | `cn` | `gtr:7890` (unused by k3s) |
+| remote_proxy | `""` | `""` (direct) |
 
 ## CI/CD
 

@@ -5,3 +5,5 @@
     daemon_reload: true
     enabled: true
     state: restarted
+  async: 120
+  poll: 5

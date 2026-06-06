@@ -14,26 +14,54 @@ This directory tracks the platform migration from the legacy Podman release flow
 - [003 Migrate corp-finance-monitor Helm ownership](../docs/issues/003-corp-finance-monitor-helm-migration.md)
 - [004 Migrate corp-finance-monitor persistent data](../docs/issues/004-corp-finance-monitor-data-migration.md)
 
-## First Deployment Slice
+## Cluster Topology
 
-The first migration slice handled in this repository is cluster bootstrap:
+| Role | Node | Tailscale IP |
+|------|------|-------------|
+| **Server** (control-plane) | aliyun | 100.102.140.59 |
+| Agent | gtr | 100.121.0.67 |
+| Agent | tencent | 100.99.48.76 |
+
+- API server URL: `https://100.102.140.59:6443`
+- Cluster CIDR: `10.60.0.0/16`, Service CIDR: `10.61.0.0/16`
+- Flannel backend: `tailscale0` (host Tailscale mesh)
+- Built-ins disabled: `traefik`, `servicelb` (replaced by Tailscale Operator in next phase)
+
+## Deployment
+
+Server and agents are deployed as separate Ansible playbooks and CI jobs:
 
 ```bash
 cd edge/ansible
-ansible-playbook -i inventory-edge.ini deploy-gtr-k3s-platform.yml
-ansible-playbook -i inventory-edge.ini verify-gtr-k3s-platform.yml
+
+# 1. Deploy K3s server on aliyun (control-plane)
+ansible-playbook -i inventory-edge.ini deploy-gtr-k3s-server.yml
+ansible-playbook -i inventory-edge.ini verify-gtr-k3s-server.yml
+
+# 2. Deploy K3s agents on GTR + tencent (after server is ready)
+ansible-playbook -i inventory-edge.ini deploy-gtr-k3s-agent.yml
+ansible-playbook -i inventory-edge.ini verify-gtr-k3s-agent.yml
 ```
+
+The CI workflow (`deploy-infra.yml`) runs server and agents in separate jobs:
+- `deploy-k3s-server`: runs in parallel with `deploy-edge`, depends on `deploy-gtr`
+- `deploy-k3s-agent`: depends on both `deploy-k3s-server` and `deploy-edge`
+
+### Idempotency
+
+Both server and agent roles check runtime health before deciding whether to install:
+- **Healthy** (systemctl active + API reachable): skip install, only render config + ensure started
+- **Not healthy / missing**: perform full install
 
 ## CI/CD
 
-`nas-deployment-public/.github/workflows/deploy-infra.yml` now includes a dedicated K3s bootstrap stage.
+`nas-deployment-public/.github/workflows/deploy-infra.yml` includes dedicated K3s server and agent stages.
 
-The workflow no longer reads `K3S_CLUSTER_TOKEN` from GitHub Actions secrets or repo-managed plaintext vars.
-Instead it decrypts `ansible/edge/group_vars/all/secret.sops.yml` from `nas-deployment-vault` at deploy time and renders `edge/ansible/group_vars/all/secret.runtime.yml` before running Ansible. The same bootstrap flow now also renders service-specific overlays for `mihomo/`, `shadowsocks-shadowtls/`, and Grafana alert secrets.
+The cluster token is never stored in plaintext — it is decrypted from `nas-deployment-vault` via sops at deploy time.
 
 Manual trigger target:
 
-- `gtr_k3s_platform`
+- `gtr_k3s_platform` — deploys server + agents (triggers `deploy-gtr`, `deploy-edge`, `deploy-k3s-server`, `deploy-k3s-agent`)
 
 ## Boundaries
 

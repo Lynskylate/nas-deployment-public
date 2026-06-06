@@ -1,0 +1,21 @@
+# Tailscale Operator Helm values (reference)
+# OAuth credentials are injected via pre-created K8s Secret `operator-oauth` in the tailscale namespace.
+# When oauth.clientId is empty, the chart auto-detects the pre-existing secret.
+
+# OAuth configuration — empty strings signal chart to use existing secret named "operator-oauth"
+oauth:
+  clientId: ""
+  clientSecret: ""
+
+# Operator identity configuration
+operatorConfig:
+  # Tags applied to the operator's own Tailscale node
+  defaultTags:
+    - "tag:k8s-operator"
+  # Custom hostname for the operator node
+  hostname: "k3s"
+
+# Proxy pod configuration
+proxyConfig:
+  # Default tag applied to proxy Pods created by the operator
+  defaultTags: "tag:k8s-proxy"

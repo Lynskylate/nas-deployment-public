@@ -5,6 +5,16 @@ edge_tunnel_server_enabled: false
 # Tencent edge node ships edge logs to GTR VictoriaLogs through Tailscale.
 edge_vector_sink_type: "victorialogs"
 
+# Tencent → aliyun Tailscale TCP broken (Tencent Cloud DPI), route via public IP.
+k3s_agent_server_url: "https://47.120.46.128:6443"
+
+# Use GTR's mihomo proxy for containerd image pulls.
+# HTTPS image pulls through Tailscale to GTR:7890 use a different path than
+# direct tencent→aliyun Tailscale, so they should work.
+k3s_containerd_http_proxy: "http://100.121.0.67:7890"
+k3s_containerd_https_proxy: "http://gtr.tail414c32.ts.net:7890"
+k3s_prereq_tailscale_nodivert: true
+
 k3s_node_labels:
   gtr.io/region: cn
   gtr.io/visibility: public

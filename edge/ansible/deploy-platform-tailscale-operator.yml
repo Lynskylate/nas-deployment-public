@@ -20,3 +20,62 @@
           --dry-run=client -o yaml | k3s kubectl apply -f -
       changed_when: false
       no_log: true
+
+    - name: Wait for Tailscale operator CRD to be available
+      ansible.builtin.shell: |
+        set -euo pipefail
+        for i in $(seq 1 30); do
+          if k3s kubectl get crd proxyclasses.tailscale.com >/dev/null 2>&1; then
+            echo "Tailscale operator CRDs are available"
+            exit 0
+          fi
+          echo "Waiting for CRDs... ($i/30)"
+          sleep 5
+        done
+        echo "ERROR: Tailscale operator CRDs not available after 150s" >&2
+        exit 1
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Wait for tailscale-operator deployment to be ready
+      ansible.builtin.shell: |
+        k3s kubectl -n tailscale rollout status deployment/operator --timeout=120s
+      changed_when: false
+      failed_when: false
+
+    - name: Apply gtr-only ProxyClass (pin proxy pods to gtr node)
+      ansible.builtin.shell: |
+        k3s kubectl apply -f - <<'EOF'
+        apiVersion: tailscale.com/v1alpha1
+        kind: ProxyClass
+        metadata:
+          name: gtr-only
+        spec:
+          statefulSet:
+            pod:
+              nodeSelector:
+                kubernetes.io/hostname: gtr
+              tolerations:
+                - key: "node-role.kubernetes.io/control-plane"
+                  operator: "Exists"
+                  effect: "NoSchedule"
+        EOF
+      changed_when: false
+
+    - name: Delete any existing tencent proxy pods to force reschedule
+      ansible.builtin.shell: |
+        set -euo pipefail
+        # Find proxy StatefulSets with pods on non-gtr nodes and restart them
+        for sts in $(k3s kubectl -n tailscale get statefulset -l tailscale.com/managed=true -o name 2>/dev/null); do
+          POD=$(k3s kubectl -n tailscale get pod -l tailscale.com/managed=true --field-selector=spec.nodeName!=gtr -o name 2>/dev/null | head -1)
+          if [ -n "$POD" ]; then
+            echo "Deleting misplaced proxy pod: $POD"
+            k3s kubectl -n tailscale delete "$POD" --wait=false
+          fi
+        done
+        echo "Done rescheduling proxy pods"
+      args:
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false

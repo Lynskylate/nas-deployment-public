@@ -16,6 +16,16 @@
   ansible.builtin.shell: |
     k3s kubectl apply -n {{ argocd_namespace }} -f {{ argocd_install_manifest_url }}
   changed_when: false
+  environment:
+    http_proxy: "{{ github_download_proxy | default('') }}"
+    https_proxy: "{{ github_download_proxy | default('') }}"
+  when: github_download_proxy | default('') | length > 0
+
+- name: Apply Argo CD install manifest (no proxy fallback)
+  ansible.builtin.shell: |
+    k3s kubectl apply -n {{ argocd_namespace }} -f {{ argocd_install_manifest_url }}
+  changed_when: false
+  when: github_download_proxy | default('') | length == 0
 
 - name: Wait for Argo CD deployment rollout
   ansible.builtin.shell: |
@@ -47,9 +57,11 @@
         set -euo pipefail
         k3s kubectl apply -n {{ argocd_namespace }} -f /tmp/argocd-repo-secret.yaml
         rm -f /tmp/argocd-repo-secret.yaml
+      args:
+        executable: /bin/bash
       changed_when: false
 
-- name: Create App-of-Apps Application
+- name: Create App-of-Apps Application (public repo, no credentials needed)
   ansible.builtin.shell: |
     cat <<'APPEOF' | k3s kubectl apply -n {{ argocd_namespace }} -f -
     apiVersion: argoproj.io/v1alpha1
@@ -101,7 +113,9 @@
 - name: Annotate argocd-server Service for Tailscale Operator
   ansible.builtin.shell: |
     k3s kubectl -n {{ argocd_namespace }} annotate service {{ argocd_server_deployment }} \
-      tailscale.com/expose=true --overwrite
+      tailscale.com/expose=true \
+      tailscale.com/proxy-class=gtr-only \
+      --overwrite
   changed_when: false
   failed_when: false
 
@@ -111,5 +125,5 @@
       - "Argo CD admin password has been retrieved ({{ argocd_admin_password.stdout | length }} chars)."
       - "To retrieve it later: k3s kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d"
       - ""
-      - "argocd-server Service annotated with tailscale.com/expose=true"
-      - "After Tailscale Operator is deployed, access at: https://argocd-server-{{ argocd_namespace }}.tail414c32.ts.net"
+      - "argocd-server Service annotated with tailscale.com/expose=true and proxy-class=gtr-only"
+      - "After Tailscale Operator is deployed, access at: https://argocd-argocd-server.tail414c32.ts.net"

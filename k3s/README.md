@@ -6,14 +6,14 @@ This directory tracks the K3s cluster platform — the host-level K3s deployment
 
 | Role | Node | Tailscale IP |
 |------|------|-------------|
-| **Server** (control-plane) | aliyun | 100.102.140.59 |
+| **Server** (control-plane) | aliyun | 100.100.99.70 |
 | Agent | gtr | 100.121.0.67 |
 | Agent | tencent | 100.99.48.76 |
 | Agent | remote_proxy | 100.66.156.40 |
 
-- API server URL: `https://100.102.140.59:6443`
+- API server URL: `https://100.100.99.70:6443`
 - Cluster CIDR: `10.60.0.0/16`, Service CIDR: `10.61.0.0/16`
-- Flannel backend: `wireguard-native` (kernel WireGuard, no tailscale0 dependency)
+- Flannel backend: `vxlan` (VXLAN over Tailscale, `flannel-iface: tailscale0`)
 - Built-ins disabled: `cloud-controller-manager`, `traefik`, `servicelb`
 - Node labels: `gtr.io/region` (`cn`/`us`), `gtr.io/visibility` (`public`/`internal`)
 - Container image pull proxy: GTR mihomo (`gtr.tail414c32.ts.net:7890`), GTR uses localhost

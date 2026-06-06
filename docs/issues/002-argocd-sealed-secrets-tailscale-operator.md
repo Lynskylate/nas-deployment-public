@@ -36,8 +36,8 @@ After this migration, application repositories can self-manage their Helm charts
 | **Tag** | `tag:k8s-operator` |
 
 ```
-Client ID:     kN2Q6wMy1Y11CNTRL
-Client Secret: tskey-client-kN2Q6wMy1Y11CNTRL-SapYYnvZBWi5ERGsENvAXiXJmPckxKnQ
+Client ID:     <REDACTED - see nas-deployment-vault>
+Client Secret: <REDACTED - see nas-deployment-vault>
 ```
 
 > `devices` scope 允许 Operator 的 proxy Pod 注册为 Tailscale 节点。

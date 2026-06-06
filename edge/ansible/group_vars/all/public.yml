@@ -110,17 +110,19 @@ edge_vm_service_name: victoriametrics
 k3s_channel: stable
 # k3s_mirror: "cn" → use Rancher CN mirror; "" → use upstream GitHub. See k3s/README.md.
 k3s_mirror: "cn"
-k3s_server_url: https://100.102.140.59:6443
+k3s_server_url: https://100.100.99.70:6443
 k3s_cluster_cidr: 10.60.0.0/16
 k3s_service_cidr: 10.61.0.0/16
 k3s_cluster_dns: 10.61.0.10
-k3s_flannel_backend: wireguard-native
+k3s_flannel_backend: "vxlan"
+k3s_flannel_iface: "tailscale0"
+k3s_embedded_registry: true
 k3s_disable_components:
 - traefik
 - servicelb
 
 # Containerd image pull proxy (docker.io blocked in China).
 # Each node overrides this in host_vars for its own proxy path.
-k3s_containerd_http_proxy: "http://gtr.tail414c32.ts.net:7890"
+k3s_containerd_http_proxy: "http://100.121.0.67:7890"
 k3s_containerd_https_proxy: "http://gtr.tail414c32.ts.net:7890"
 k3s_containerd_no_proxy: "localhost,127.0.0.1,10.0.0.0/8,100.0.0.0/8"

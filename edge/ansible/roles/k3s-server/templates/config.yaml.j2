@@ -7,6 +7,10 @@ advertise-address: "{{ k3s_server_effective_ip }}"
 node-ip: "{{ k3s_server_effective_ip }}"
 node-name: "{{ inventory_hostname }}"
 flannel-backend: "{{ k3s_flannel_backend }}"
+{% if k3s_flannel_iface | default('') | length > 0 %}
+flannel-iface: "{{ k3s_flannel_iface }}"
+{% endif %}
+embedded-registry: {{ k3s_embedded_registry | default(true) | lower }}
 disable-cloud-controller: true
 disable:
 {% for item in k3s_disable_components %}

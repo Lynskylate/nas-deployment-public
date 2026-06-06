@@ -21,6 +21,8 @@ spec:
           hostname: "k3s"
         proxyConfig:
           defaultTags: "tag:k8s-proxy"
+        # Default ProxyClass for all exposed Services (pin proxy pods to gtr)
+        defaultProxyClass: gtr-only
   destination:
     server: https://kubernetes.default.svc
     namespace: tailscale

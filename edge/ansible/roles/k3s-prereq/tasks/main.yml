@@ -29,3 +29,24 @@
     group: root
     mode: "0644"
   notify: reload k3s sysctl
+
+- name: Check current Tailscale netfilter mode
+  ansible.builtin.shell: |
+    set -o pipefail
+    tailscale debug prefs 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('NetfilterMode',0))"
+  register: k3s_prereq_tailscale_netfilter
+  changed_when: false
+  failed_when: false
+  when:
+    - k3s_prereq_tailscale_nodivert | default(false) | bool
+
+- name: Set tailscale --netfilter-mode=nodivert
+  ansible.builtin.shell: |
+    tailscale set --netfilter-mode=nodivert --accept-routes
+  register: k3s_prereq_tailscale_status
+  changed_when: k3s_prereq_tailscale_status.rc == 0
+  when:
+    - k3s_prereq_tailscale_nodivert | default(false) | bool
+    - k3s_prereq_tailscale_netfilter.stdout | trim | int != 1
+  # 1 = nodivert, 2 = on (default)
+  # Skip if already set to nodivert

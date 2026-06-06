@@ -1,0 +1,64 @@
+---
+- name: Verify Tailscale Operator on aliyun K3s
+  hosts: edge_aliyun
+  become: true
+
+  tasks:
+    - name: Check tailscale namespace
+      ansible.builtin.shell: |
+        k3s kubectl get namespace tailscale -o name
+      register: tailscale_ns
+      changed_when: false
+      failed_when: false
+
+    - name: Check Tailscale Operator pods
+      ansible.builtin.shell: |
+        k3s kubectl -n tailscale get pods -o wide 2>/dev/null || echo "No pods in tailscale namespace"
+      register: operator_pods
+      changed_when: false
+      failed_when: false
+
+    - name: Check Tailscale Operator deployments
+      ansible.builtin.shell: |
+        k3s kubectl -n tailscale get deployments 2>/dev/null || echo "No deployments in tailscale namespace"
+      register: operator_deployments
+      changed_when: false
+      failed_when: false
+
+    - name: Check Argo CD Application sync status for tailscale-operator
+      ansible.builtin.shell: |
+        k3s kubectl -n argocd get application tailscale-operator \
+          -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "NOT_FOUND"
+      register: tailscale_app_sync
+      changed_when: false
+      failed_when: false
+
+    - name: Check Argo CD Application health for tailscale-operator
+      ansible.builtin.shell: |
+        k3s kubectl -n argocd get application tailscale-operator \
+          -o jsonpath='{.status.health.status}' 2>/dev/null || echo "NOT_FOUND"
+      register: tailscale_app_health
+      changed_when: false
+      failed_when: false
+
+    - name: Show Tailscale Operator summary
+      ansible.builtin.debug:
+        msg:
+          - "=== Tailscale Operator Verification ==="
+          - "Namespace: {{ 'EXISTS' if tailscale_ns.stdout != '' else 'NOT FOUND' }}"
+          - ""
+          - "Pods:"
+          - "{{ operator_pods.stdout }}"
+          - ""
+          - "Deployments:"
+          - "{{ operator_deployments.stdout }}"
+          - ""
+          - "Argo CD Application sync: {{ tailscale_app_sync.stdout }}"
+          - "Argo CD Application health: {{ tailscale_app_health.stdout }}"
+          - ""
+          - "To expose a service via Tailscale:"
+          - "  k3s kubectl annotate service <svc-name> tailscale.com/expose=true"
+          - ""
+          - "To expose Argo CD UI:"
+          - "  k3s kubectl annotate service argocd-server -n argocd tailscale.com/expose=true"
+          - "  Access: https://argocd-server-argocd.tail414c32.ts.net"

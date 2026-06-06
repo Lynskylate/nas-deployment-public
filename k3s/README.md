@@ -1,18 +1,6 @@
-# K3s Migration Baseline
+# K3s Platform Baseline
 
-This directory tracks the platform migration from the legacy Podman release flow to:
-
-- K3s
-- Argo CD
-- Sealed Secrets
-- Tailscale Operator
-
-## Issue Docs
-
-- [001 Bootstrap K3s Platform](../docs/issues/001-k3s-platform-bootstrap.md)
-- [002 Install Argo CD + Sealed Secrets + Tailscale Operator](../docs/issues/002-argocd-sealed-secrets-tailscale-operator.md)
-- [003 Migrate corp-finance-monitor Helm ownership](../docs/issues/003-corp-finance-monitor-helm-migration.md)
-- [004 Migrate corp-finance-monitor persistent data](../docs/issues/004-corp-finance-monitor-data-migration.md)
+This directory tracks the K3s cluster platform — the host-level K3s deployment, and the K3s-internal platform components managed by this repository.
 
 ## Cluster Topology
 
@@ -30,9 +18,58 @@ This directory tracks the platform migration from the legacy Podman release flow
 - Node labels: `gtr.io/region` (`cn`/`us`), `gtr.io/visibility` (`public`/`internal`)
 - Container image pull proxy: GTR mihomo (`gtr.tail414c32.ts.net:7890`), GTR uses localhost
 
+## Platform Components
+
+| Component | Status | Management |
+|-----------|--------|------------|
+| **K3s** (server + agents) | ✅ Deployed | Ansible (`edge/ansible/`) |
+| **Argo CD** | ✅ Deployed | Ansible bootstrap → self-managed via App-of-Apps |
+| **Sealed Secrets** | ✅ Deployed | Ansible bootstrap → Argo CD Application |
+| **Tailscale Operator** | ✅ Deployed | Argo CD Application (GitOps) |
+
+Deployment order: `Argo CD → Sealed Secrets → Tailscale Operator → 平台应用`
+
+## Repository Layout
+
+```
+nas-deployment-public/
+├── edge/ansible/              ← Host-level + K3s platform (Ansible)
+│   ├── roles/
+│   │   ├── k3s-prereq/        ✅ Installed
+│   │   ├── k3s-server/        ✅ Installed
+│   │   ├── k3s-agent/         ✅ Installed
+│   │   └── argocd/            📋 Planned (Phase 1)
+│   ├── deploy-gtr-k3s-server.yml      ✅
+│   ├── deploy-gtr-k3s-agent.yml       ✅
+│   ├── deploy-platform-argocd.yml      📋 Planned
+│   ├── deploy-platform-sealed-secrets.yml 📋 Planned
+│   ├── verify-gtr-k3s-server.yml      ✅
+│   ├── verify-gtr-k3s-agent.yml       ✅
+│   ├── verify-platform-argocd.yml      📋 Planned
+│   ├── verify-platform-sealed-secrets.yml 📋 Planned
+│   └── verify-platform-tailscale-operator.yml 📋 Planned
+│
+├── platform/                  ← K3s 内平台组件声明式配置
+│   ├── applications/          ← Argo CD Application CRDs (App-of-Apps)
+│   │   ├── sealed-secrets.yaml         📋 Planned
+│   │   └── tailscale-operator.yaml     📋 Planned
+│   └── helm-values/
+│       └── tailscale-operator/
+│           └── values.yaml             📋 Planned
+│
+├── k3s/                       ← 本文档
+├── docs/issues/               ← 迁移规划文档
+│   ├── 001-k3s-platform-bootstrap.md  ✅ Completed
+│   ├── 002-argocd-sealed-secrets-tailscale-operator.md  ✅ Completed
+│   ├── 003-corp-finance-monitor-helm-migration.md
+│   └── 004-corp-finance-monitor-data-migration.md
+└── .github/workflows/
+    └── deploy-infra.yml       ← CI: deploy-platform-operators job ✅ Added
+```
+
 ## Deployment
 
-Server and agents are deployed as separate Ansible playbooks and CI jobs:
+### K3s 集群层（已完成）
 
 ```bash
 cd edge/ansible
@@ -46,34 +83,42 @@ ansible-playbook -i inventory-edge.ini deploy-gtr-k3s-agent.yml
 ansible-playbook -i inventory-edge.ini verify-gtr-k3s-agent.yml
 ```
 
-The CI workflow (`deploy-infra.yml`) runs server and agents in separate jobs:
+### 平台组件层（已完成）
+
+```bash
+# 3. Deploy platform operators（one-shot）
+ansible-playbook -i inventory-edge.ini deploy-platform-argocd.yml
+ansible-playbook -i inventory-edge.ini verify-platform-argocd.yml
+
+ansible-playbook -i inventory-edge.ini deploy-platform-sealed-secrets.yml
+ansible-playbook -i inventory-edge.ini verify-platform-sealed-secrets.yml
+
+# 4. Verify Tailscale Operator (synced via Argo CD)
+ansible-playbook -i inventory-edge.ini verify-platform-tailscale-operator.yml
+```
+
+## CI/CD
+
+The CI workflow (`deploy-infra.yml`) includes dedicated jobs:
 - `deploy-k3s-server`: runs in parallel with `deploy-edge`, depends on `deploy-gtr`
 - `deploy-k3s-agent`: depends on both `deploy-k3s-server` and `deploy-edge`
+- `deploy-platform-operators`: depends on `deploy-k3s-agent` (✅ Added)
 
-### Idempotency
+## Idempotency
 
 Both server and agent roles check runtime health before deciding whether to install:
 - **Healthy** (systemctl active + API reachable): skip install, only render config + ensure started
 - **Not healthy / missing**: perform full install
 
-### Install Source (`k3s_mirror`)
+Argo CD 安装角色使用类似逻辑：检查 argocd namespace 和 argocd-server deployment 状态。
 
-All nodes default to `k3s_mirror: "cn"` (`group_vars/all/public.yml`), which uses the Rancher CN mirror for faster binary downloads inside China:
+Sealed Secrets 安装后会在 `/tmp/` 保留私钥备份，需手动 sops 加密后存入 vault repo。
 
-| Mirror | Install script | Binary source |
-|--------|---------------|---------------|
-| `cn` | `https://rancher-mirror.rancher.cn/k3s/k3s-install.sh` | `rancher-mirror.rancher.cn/k3s/<version>/k3s-amd64` |
-| `""` (empty) | `https://get.k3s.io` | `github.com/k3s-io/k3s/releases` |
+Tailscale Operator 通过 Argo CD Application 管理，首次同步需要集群中存在 `tailscale-operator-oauth` SealedSecret。
 
-When `k3s_mirror: "cn"`:
-- Install script is downloaded from the Rancher mirror
-- `INSTALL_K3S_MIRROR=cn` is set, directing the script to download the binary from the CN mirror
-- Proxy settings (`http_proxy`/`https_proxy`) are **not** passed to the install step, since the mirror is directly reachable
+## Install Source (`k3s_mirror`)
 
-When `k3s_mirror: ""` (overseas nodes like remote_proxy):
-- Install script comes from `get.k3s.io`
-- Binary downloads from GitHub releases
-- Proxy is used if `github_download_proxy` is set for the host
+All nodes default to `k3s_mirror: "cn"` (`group_vars/all/public.yml`), which uses the Rancher CN mirror for faster binary downloads inside China. See detailed node-level override table below.
 
 | Node | `k3s_mirror` | `github_download_proxy` |
 |------|------------|---------------------|
@@ -82,18 +127,11 @@ When `k3s_mirror: ""` (overseas nodes like remote_proxy):
 | tencent | `cn` | `gtr:7890` (unused by k3s) |
 | remote_proxy | `""` | `""` (direct) |
 
-## CI/CD
-
-`nas-deployment-public/.github/workflows/deploy-infra.yml` includes dedicated K3s server and agent stages.
-
-The cluster token is never stored in plaintext — it is decrypted from `nas-deployment-vault` via sops at deploy time.
-
-Manual trigger target:
-
-- `gtr_k3s_platform` — deploys server + agents (triggers `deploy-gtr`, `deploy-edge`, `deploy-k3s-server`, `deploy-k3s-agent`)
-
 ## Boundaries
 
-- `nas-deployment` owns host baseline, K3s, Argo bootstrap, platform operators, and shared platform services.
-- Application repositories own their own Helm charts and Kubernetes resources.
-- PRs must link the matching migration issue and planning document.
+- `nas-deployment` owns: host baseline, K3s, Argo CD bootstrap, platform operators, shared platform services
+- Application repositories own: their own Helm charts and Kubernetes resources
+- `platform/applications/` in this repo holds only platform-level Argo CD Application CRDs
+  - Business applications register their own Applications in their own repos
+- PRs must link the matching migration issue and planning document
+

@@ -1,0 +1,7 @@
+---
+- name: Deploy Argo CD on aliyun K3s
+  hosts: edge_aliyun
+  become: true
+
+  roles:
+    - role: argocd

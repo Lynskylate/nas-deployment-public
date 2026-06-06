@@ -1,0 +1,68 @@
+---
+- name: Verify Argo CD on aliyun K3s
+  hosts: edge_aliyun
+  become: true
+
+  tasks:
+    - name: Check Argo CD pods
+      ansible.builtin.shell: |
+        k3s kubectl -n argocd get pods -o wide
+      register: argocd_pods
+      changed_when: false
+
+    - name: Check Argo CD deployments
+      ansible.builtin.shell: |
+        k3s kubectl -n argocd get deployments
+      register: argocd_deployments
+      changed_when: false
+
+    - name: Check Argo CD services
+      ansible.builtin.shell: |
+        k3s kubectl -n argocd get svc
+      register: argocd_services
+      changed_when: false
+
+    - name: Check argocd-server deployment status
+      ansible.builtin.shell: |
+        k3s kubectl -n argocd rollout status deployment/argocd-server --timeout=10s
+      register: argocd_server_status
+      changed_when: false
+      failed_when: false
+
+    - name: Check argocd-initial-admin-secret exists
+      ansible.builtin.shell: |
+        k3s kubectl -n argocd get secret argocd-initial-admin-secret -o name
+      register: argocd_admin_secret
+      changed_when: false
+      failed_when: argocd_admin_secret.stdout == ""
+
+    - name: Get admin password
+      ansible.builtin.shell: |
+        k3s kubectl -n argocd get secret argocd-initial-admin-secret \
+          -o jsonpath='{.data.password}' | base64 -d
+      register: argocd_admin_password
+      changed_when: false
+      failed_when: argocd_admin_password.stdout | length == 0
+
+    - name: Show Argo CD summary
+      ansible.builtin.debug:
+        msg:
+          - "=== Argo CD Verification ==="
+          - "Pods:"
+          - "{{ argocd_pods.stdout }}"
+          - ""
+          - "Deployments:"
+          - "{{ argocd_deployments.stdout }}"
+          - ""
+          - "Services:"
+          - "{{ argocd_services.stdout }}"
+          - ""
+          - "argocd-server rollout: {{ argocd_server_status.stdout | default('check failed') }}"
+          - "admin secret exists: {{ argocd_admin_secret.stdout != '' }}"
+          - "admin password retrieved: {{ argocd_admin_password.stdout | length > 0 }}"
+          - ""
+          - "To access Argo CD UI:"
+          - "  k3s kubectl port-forward -n argocd svc/argocd-server 8080:80"
+          - "  Open http://127.0.0.1:8080"
+          - "  Username: admin"
+          - "  Password retrieved ({{ argocd_admin_password.stdout | length }} chars)"

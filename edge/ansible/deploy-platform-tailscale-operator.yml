@@ -1,0 +1,22 @@
+---
+- name: Pre-create Tailscale Operator prerequisites on aliyun K3s
+  hosts: edge_aliyun
+  become: true
+
+  tasks:
+    - name: Ensure tailscale namespace exists
+      ansible.builtin.shell: |
+        k3s kubectl create namespace tailscale --dry-run=client -o yaml \
+          | k3s kubectl apply -f -
+      changed_when: false
+
+    - name: Create OAuth client Secret from vault
+      when: tailscale_operator_oauth_client_id is defined and tailscale_operator_oauth_client_secret is defined
+      ansible.builtin.shell: |
+        k3s kubectl create secret generic operator-oauth \
+          -n tailscale \
+          --from-literal=client_id={{ tailscale_operator_oauth_client_id }} \
+          --from-literal=client_secret={{ tailscale_operator_oauth_client_secret }} \
+          --dry-run=client -o yaml | k3s kubectl apply -f -
+      changed_when: false
+      no_log: true

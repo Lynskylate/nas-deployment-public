@@ -44,6 +44,7 @@ jobs:
       run_edge: ${{ steps.resolve.outputs.run_edge }}
       run_k3s_server: ${{ steps.resolve.outputs.run_k3s_server }}
       run_k3s_agent: ${{ steps.resolve.outputs.run_k3s_agent }}
+      run_k3s_platform: ${{ steps.resolve.outputs.run_k3s_platform }}
       run_validate_contract: ${{ steps.resolve.outputs.run_validate_contract }}
       edge_targets: ${{ steps.resolve.outputs.edge_targets }}
     steps:
@@ -111,6 +112,7 @@ jobs:
           run_edge=false
           run_k3s_server=false
           run_k3s_agent=false
+          run_k3s_platform=false
           run_validate_contract=false
           edge_targets='[]'
 
@@ -120,6 +122,7 @@ jobs:
               run_edge=true
               run_k3s_server=true
               run_k3s_agent=true
+              run_k3s_platform=true
               run_validate_contract=true
               edge_targets='["remote_proxy","aliyun","tencent"]'
               ;;
@@ -132,6 +135,7 @@ jobs:
               run_edge=true
               run_k3s_server=true
               run_k3s_agent=true
+              run_k3s_platform=true
               edge_targets='["aliyun","tencent"]'
               ;;
             edge_remote_proxy)
@@ -158,6 +162,7 @@ jobs:
             echo "run_edge=$run_edge"
             echo "run_k3s_server=$run_k3s_server"
             echo "run_k3s_agent=$run_k3s_agent"
+            echo "run_k3s_platform=$run_k3s_platform"
             echo "run_validate_contract=$run_validate_contract"
             echo "edge_targets=$edge_targets"
           } >> "$GITHUB_OUTPUT"
@@ -346,6 +351,74 @@ jobs:
       - name: Verify K3s agents
         working-directory: edge/ansible
         run: ansible-playbook -i inventory-edge.ini verify-gtr-k3s-agent.yml -v
+
+      - if: always()
+        name: Cleanup vault artifacts
+        run: bash .github/scripts/cleanup-vault.sh
+
+  deploy-platform-operators:
+    needs: [preflight, deploy-k3s-agent]
+    if: needs.preflight.outputs.run_k3s_platform == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - uses: actions/checkout@v6
+
+      - id: bootstrap
+        uses: ./.github/actions/bootstrap-deploy-env
+        with:
+          vault_repo_slug: ${{ vars.VAULT_REPO_SLUG }}
+          vault_repo_ssh_key: ${{ secrets.VAULT_REPO_SSH_KEY }}
+          sops_age_key: ${{ secrets.SOPS_AGE_KEY }}
+
+      - name: Connect Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ steps.bootstrap.outputs.ts_oauth_client_id }}
+          oauth-secret: ${{ steps.bootstrap.outputs.ts_oauth_secret }}
+          tags: tag:ci
+
+      - name: Add GTR host alias
+        run: echo "${{ env.GTR_TAILSCALE_IP }} gtr gtr.tail414c32.ts.net" | sudo tee -a /etc/hosts
+
+      - name: Deploy Argo CD
+        working-directory: edge/ansible
+        run: ansible-playbook -i inventory-edge.ini deploy-platform-argocd.yml -v
+
+      - name: Verify Argo CD
+        working-directory: edge/ansible
+        run: ansible-playbook -i inventory-edge.ini verify-platform-argocd.yml -v
+
+      - name: Deploy Sealed Secrets
+        working-directory: edge/ansible
+        run: ansible-playbook -i inventory-edge.ini deploy-platform-sealed-secrets.yml -v
+
+      - name: Verify Sealed Secrets
+        working-directory: edge/ansible
+        run: ansible-playbook -i inventory-edge.ini verify-platform-sealed-secrets.yml -v
+
+      - name: Deploy Tailscale Operator prerequisites
+        working-directory: edge/ansible
+        run: ansible-playbook -i inventory-edge.ini deploy-platform-tailscale-operator.yml -v
+
+      - name: Manual: Back up Sealed Secrets private key to vault
+        run: |
+          echo "=== Sealed Secrets key backup (manual) ==="
+          echo "The deploy playbook exports the private key and then cleans it up."
+          echo "To back it up, re-export and encrypt it:"
+          echo ""
+          echo "  ssh root@100.102.140.59 k3s kubectl get secret -n kube-system \\"
+          echo "    -l sealedsecrets.bitnami.com/sealed-secrets-key \\"
+          echo "    -o yaml > /tmp/sealed-secrets-key-backup.yaml"
+          echo "  sops --encrypt --age <AGE_KEY> /tmp/sealed-secrets-key-backup.yaml \\"
+          echo "    > nas-deployment-vault/infra/sealed-secrets/key-backup.enc.yaml"
+          echo "  rm -f /tmp/sealed-secrets-key-backup.yaml"
+          echo "  cd nas-deployment-vault && git add infra/sealed-secrets/ && git commit -m 'backup sealed-secrets key' && git push"
+
+      - name: Verify Tailscale Operator sync status
+        working-directory: edge/ansible
+        run: ansible-playbook -i inventory-edge.ini verify-platform-tailscale-operator.yml -v
 
       - if: always()
         name: Cleanup vault artifacts

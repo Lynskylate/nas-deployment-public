@@ -22,3 +22,4 @@ Every migration PR should include:
 - `003-corp-finance-monitor-helm-migration.md` -> GitHub issue `#5`
 - `004-corp-finance-monitor-data-migration.md` -> GitHub issue `#6`
 - `005-private-secrets-repo-bootstrap.md` -> GitHub issue `#8`
+- `009-sealed-secrets-key-backup.md` -> GitHub issue `#9`（待创建）

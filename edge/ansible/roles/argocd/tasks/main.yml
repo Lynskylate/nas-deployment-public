@@ -1,0 +1,115 @@
+---
+- name: Assert required variables
+  ansible.builtin.assert:
+    that:
+      - argocd_install_manifest_url is defined
+      - argocd_install_manifest_url | length > 0
+    fail_msg: "argocd_install_manifest_url must be defined"
+
+- name: Create argocd namespace
+  ansible.builtin.shell: |
+    k3s kubectl create namespace {{ argocd_namespace }} --dry-run=client -o yaml \
+      | k3s kubectl apply -f -
+  changed_when: false
+
+- name: Apply Argo CD install manifest
+  ansible.builtin.shell: |
+    k3s kubectl apply -n {{ argocd_namespace }} -f {{ argocd_install_manifest_url }}
+  changed_when: false
+
+- name: Wait for Argo CD deployment rollout
+  ansible.builtin.shell: |
+    k3s kubectl -n {{ argocd_namespace }} rollout status deployment/{{ argocd_server_deployment }} --timeout=120s
+  changed_when: false
+  register: argocd_rollout
+  failed_when: argocd_rollout.rc != 0
+
+- name: Get initial admin password
+  ansible.builtin.shell: |
+    k3s kubectl -n {{ argocd_namespace }} get secret {{ argocd_initial_admin_secret }} \
+      -o jsonpath='{.data.password}' | base64 -d
+  register: argocd_admin_password
+  changed_when: false
+  failed_when: argocd_admin_password.stdout | length == 0
+
+- name: Create repo credential secret from template
+  when: argocd_repo_ssh_key is defined and argocd_repo_ssh_key | length > 0
+  block:
+    - name: Render repo credential secret
+      ansible.builtin.template:
+        src: argocd-repo-secret.yaml.j2
+        dest: /tmp/argocd-repo-secret.yaml
+        mode: "0600"
+      changed_when: false
+
+    - name: Apply repo credential secret
+      ansible.builtin.shell: |
+        set -euo pipefail
+        k3s kubectl apply -n {{ argocd_namespace }} -f /tmp/argocd-repo-secret.yaml
+        rm -f /tmp/argocd-repo-secret.yaml
+      changed_when: false
+
+- name: Create App-of-Apps Application
+  ansible.builtin.shell: |
+    cat <<'APPEOF' | k3s kubectl apply -n {{ argocd_namespace }} -f -
+    apiVersion: argoproj.io/v1alpha1
+    kind: Application
+    metadata:
+      name: platform-apps
+      namespace: {{ argocd_namespace }}
+    spec:
+      project: default
+      source:
+        repoURL: {{ argocd_repo_url }}
+        targetRevision: HEAD
+        path: platform/applications
+        directory:
+          recurse: true
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: argocd
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+    APPEOF
+  changed_when: false
+
+- name: Download Argo CD CLI
+  ansible.builtin.get_url:
+    url: "{{ argocd_cli_download_url }}"
+    dest: "{{ argocd_cli_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+  environment:
+    http_proxy: "{{ github_download_proxy | default('') }}"
+    https_proxy: "{{ github_download_proxy | default('') }}"
+  when: github_download_proxy | default('') | length > 0
+
+- name: Download Argo CD CLI (no proxy fallback)
+  ansible.builtin.get_url:
+    url: "{{ argocd_cli_download_url }}"
+    dest: "{{ argocd_cli_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+  when: github_download_proxy | default('') | length == 0
+
+- name: Annotate argocd-server Service for Tailscale Operator
+  ansible.builtin.shell: |
+    k3s kubectl -n {{ argocd_namespace }} annotate service {{ argocd_server_deployment }} \
+      tailscale.com/expose=true --overwrite
+  changed_when: false
+  failed_when: false
+
+- name: Show Argo CD admin password hint
+  ansible.builtin.debug:
+    msg:
+      - "Argo CD admin password has been retrieved ({{ argocd_admin_password.stdout | length }} chars)."
+      - "To retrieve it later: k3s kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d"
+      - ""
+      - "argocd-server Service annotated with tailscale.com/expose=true"
+      - "After Tailscale Operator is deployed, access at: https://argocd-server-{{ argocd_namespace }}.tail414c32.ts.net"

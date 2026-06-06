@@ -4,6 +4,9 @@ gtr_expected_proxy_ports:
 github_download_proxy: http://127.0.0.1:7890
 k3s_containerd_http_proxy: "http://127.0.0.1:7890"
 k3s_containerd_https_proxy: "http://127.0.0.1:7890"
+k3s_registry_mirrors:
+  docker.io:
+    - "https://quqdq6jy.mirror.aliyuncs.com"
 k3s_node_labels:
   gtr.io/region: cn
   gtr.io/visibility: internal

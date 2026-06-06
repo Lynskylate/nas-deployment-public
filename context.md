@@ -1,451 +1,371 @@
-# Code Context — Full Scan Results
+# K3s 跨节点网络不通 — 根因分析 & Troubleshooting 上下文
 
-## Files Retrieved
-
-1. `k3s/README.md` (1-82) — K3s migration baseline docs
-2. `edge/ansible/group_vars/all/public.yml` (1-126) — All shared variables (k3s, envoy, tailscale, vector)
-3. `edge/ansible/host_vars/gtr/public.yml` (1-13) — GTR host vars (k3s_node_labels, proxy)
-4. `edge/ansible/host_vars/aliyun/public.yml` (1-20) — Aliyun host vars (k3s server, registry mirrors)
-5. `edge/ansible/host_vars/remote_proxy.yml` (1-20) — Remote proxy vars (tunnel, envoy routes)
-6. `edge/ansible/host_vars/tencent.yml` (1-8) — Tencent host vars (k3s_node_labels)
-7. `edge/ansible/inventory-edge.ini` (1-12) — Edge inventory (tailscale IPs for all hosts)
-8. `tailscale-services/README.md` (1-270) — Tailscale Services docs (MagicDNS, serve, exit node)
-9. `tailscale-services/apply-service-hosts.sh` (1-40) — Shell script to re-apply Tailscale service hosts
-10. `tailscale-services/exit-node-troubleshooting-2026-05-31.md` (1-80) — Exit node + Mihomo TUN routing diagnostics
-11. `tailscale-services/exit-node-implementation.md` — Exit node nftables fix
-12. `edge/ansible/roles/edge-tailscale/tasks/main.yml` (1-25) — Tailscale install/enable
-13. `edge/ansible/roles/k3s-server/tasks/main.yml` (1-110) — K3s server deployment
-14. `edge/ansible/roles/k3s-server/templates/config.yaml.j2` (1-16) — K3s server config template
-15. `edge/ansible/roles/k3s-server/templates/registries.yaml.j2` (1-12) — Containerd registry mirrors
-16. `edge/ansible/roles/k3s-server/defaults/main.yml` (1-8) — K3s server defaults
-17. `edge/ansible/roles/k3s-server/handlers/main.yml` (1-8) — K3s server restart handler
-18. `edge/ansible/roles/k3s-agent/tasks/main.yml` (1-100) — K3s agent deployment
-19. `edge/ansible/roles/k3s-agent/templates/config.yaml.j2` (1-4) — K3s agent config template
-20. `edge/ansible/roles/k3s-prereq/tasks/main.yml` (1-25) — K3s prerequisites
-21. `edge/ansible/roles/k3s-prereq/defaults/main.yml` (1-15) — K3s prereq packages/modules/sysctls
-22. `edge/ansible/roles/k3s-prereq/templates/k3s-sysctl.conf.j2` (1-5) — Sysctl tuning
-23. `edge/ansible/roles/edge-envoy/templates/envoy.yaml.j2` (1-30) — Edge Envoy bootstrap
-24. `edge/ansible/roles/edge-envoy/templates/lds.yaml.j2` (1-130) — Edge Envoy listener config
-25. `edge/ansible/roles/edge-envoy/templates/cds.yaml.j2` (1-60) — Edge Envoy cluster config
-26. `edge/ansible/roles/edge-vector/tasks/main.yml` — Vector log shipper
-27. `edge/ansible/roles/edge-vector/templates/vector.yaml.j2` — Vector config template
-28. `edge/ansible/roles/mihomo/templates/config.yaml.j2` (1-200) — Mihomo TUN/proxy config
-29. `edge/ansible/roles/tailscale-exitnode/tasks/main.yml` (1-120) — Exit node routing fix
-30. `mihomo/ansible/group_vars/all/public.yml` (1-40) — Mihomo + exit node vars
-31. `mihomo/ansible/inventory.ini` (1-10) — Mihomo inventory (gtr via tailscale)
-32. `edge/ansible/deploy-gtr-k3s-server.yml` — K3s server playbook
-33. `edge/ansible/deploy-gtr-k3s-agent.yml` — K3s agent playbook
-34. `edge/ansible/verify-gtr-k3s-server.yml` — K3s server verify
-35. `edge/ansible/verify-gtr-k3s-agent.yml` — K3s agent verify
-36. `edge/ansible/deploy-edge.yml` — Edge baseline playbook
-37. `edge/ansible/deploy-gtr-project-runtime.yml` — Project runtime (Podman) on GTR
-38. `mihomo/ansible/deploy.yml` — Mihomo deployment
-39. `.resource-manifest.yml` — Port/service registry
-40. `.github/workflows/deploy-infra.yml` (1-400) — Full CI/CD pipeline
-41. `docs/issues/001-k3s-platform-bootstrap.md` — Original K3s bootstrap plan
-42. `docs/issues/002-argocd-sealed-secrets-tailscale-operator.md` — Platform operators plan
-43. `docs/issues/003-corp-finance-monitor-helm-migration.md` — App migration plan
-44. `docs/issues/004-corp-finance-monitor-data-migration.md` — Data migration plan
-45. `docs/issues/005-private-secrets-repo-bootstrap.md` — Secrets vault bootstrap
-46. `docs/issues/006-k3s-deploy-optimization.md` — K3s topology + CI optimization
-47. `docs/issues/007-k3s-flannel-tailscale-crashloop.md` — Flannel/tailscale0 crashloop analysis
-48. `docs/issues/008-docker-nftables-conflict-analysis.md` — Docker nftables conflict analysis
-49. `docs/topic/infrastructure/decentralized-resource-isolation.md` — Resource manifest contract
-50. `edge/ansible/verify-gtr-no-regression.yml` — GTR proxy regression check
-51. `edge/ansible/deploy-gtr-ai-tools.yml` — AI tools on GTR
-52. `project-runtime/README.md` — Podman runtime baseline
+> 生成时间: 2026-06-07
+> 任务: 分析 K3s 集群中 Pod 跨节点通信失败的根本原因，输出给后续 agent 进行修复
 
 ---
 
-## 1. K3s/K3s-Related Files
+## 一、集群拓扑与当前配置
 
-### Cluster Topology
-- **Status:** Active; migrated from GTR server → aliyun server after crashloop fix
-- **Nodes:**
-  | Role | Node | Tailscale IP | Labels |
-  |------|------|-------------|--------|
-  | **Server** (control-plane) | aliyun | 100.102.140.59 | `gtr.io/region: cn`, `gtr.io/visibility: public` |
-  | **Agent** | gtr | 100.121.0.67 | `gtr.io/region: cn`, `gtr.io/visibility: internal` |
-  | **Agent** | tencent | 100.99.48.76 | `gtr.io/region: cn`, `gtr.io/visibility: public` |
-  | **Agent** | remote_proxy | 100.66.156.40 | (no explicit labels) |
-- API server: `https://100.102.140.59:6443`
-- Cluster CIDR: `10.60.0.0/16`, Service CIDR: `10.61.0.0/16`, Cluster DNS: `10.61.0.10`
-- Flannel backend: `wireguard-native` (kernel WireGuard, avoids tailscale0 dependency, fixed crashloop from issue #007)
-- Built-ins disabled: `cloud-controller-manager`, `traefik`, `servicelb`
-- K3s channel: `stable`
+### 节点列表
 
-### Key Files
+| 角色 | 节点 | Tailscale IP | Ansible Inventory 组 | 当前部署 playbook |
+|------|------|-------------|---------------------|-------------------|
+| **Server** (control-plane) | aliyun | `100.102.140.59` | `edge_aliyun` | `deploy-gtr-k3s-server.yml` |
+| **Agent** | gtr | `100.121.0.67` | `gtr_core` | `deploy-gtr-k3s-agent.yml` |
+| **Agent** | tencent | `100.99.48.76` | `edge_tencent` | `deploy-gtr-k3s-agent.yml` |
+| **(非 K3s 节点)** | remote_proxy | `100.66.156.40` | `edge_remote_proxy` | 无 K3s 部署 |
+
+> ⚠️ `remote_proxy` **不是** K3s 节点。`deploy-gtr-k3s-agent.yml` 只覆盖 `gtr_core:edge_tencent`，不包含 `edge_remote_proxy`。
+
+### 网络 CIDR
+
+| 网段 | 值 | 说明 |
+|------|-----|------|
+| Pod CIDR (k3s) | `10.60.0.0/16` | Flannel 分配的子网 |
+| Service CIDR (k3s) | `10.61.0.0/16` | K3s Service 虚拟 IP |
+| Cluster DNS | `10.61.0.10` | CoreDNS Service IP |
+| Tailscale CGNAT | `100.64.0.0/10` | 所有节点都在此范围 |
+| Tailscale /32 端点 | `100.102.140.59/32`, `100.121.0.67/32`, `100.99.48.76/32` | 节点 IP 是点对点 /32 地址 |
+
+### Flannel 配置
 
 ```
-k3s/README.md                          # Migration baseline docs
-edge/ansible/roles/k3s-prereq/         # Prerequisites (packages, modules, sysctls)
-edge/ansible/roles/k3s-server/         # Server role (tasks, templates, defaults, handlers)
-edge/ansible/roles/k3s-agent/          # Agent role (tasks, templates, defaults, handlers)
-edge/ansible/deploy-gtr-k3s-server.yml # Deploy server (hosts: edge_aliyun)
-edge/ansible/deploy-gtr-k3s-agent.yml  # Deploy agents (hosts: gtr_core:edge_tencent)
-edge/ansible/verify-gtr-k3s-server.yml
-edge/ansible/verify-gtr-k3s-agent.yml
-```
-
-### K3s Server Config (`config.yaml.j2`)
-```yaml
-token: "{{ k3s_cluster_token }}"           # From sops-decrypted vault
-write-kubeconfig-mode: "0640"
-cluster-cidr: "10.60.0.0/16"
-service-cidr: "10.61.0.0/16"
-cluster-dns: "10.61.0.10"
-advertise-address: "{{ k3s_server_effective_ip }}"  # Tailscale IP
-node-ip: "{{ k3s_server_effective_ip }}"             # Tailscale IP
-node-name: "{{ inventory_hostname }}"
 flannel-backend: "wireguard-native"
-disable-cloud-controller: true
-disable:
-  - traefik
-  - servicelb
-tls-san: [aliyun, 100.102.140.59, ...]
 ```
 
-### K3s Agent Config (`config.yaml.j2`)
-```yaml
-server: "https://100.102.140.59:6443"
-token: "{{ k3s_cluster_token }}"
-node-ip: "{{ k3s_agent_effective_ip }}"  # Tailscale IP from `tailscale ip -4`
-node-name: "{{ inventory_hostname }}"
-```
+- 文件中无 `flannel-iface` 设置 → Flannel 使用默认接口（即 `node-ip` 对应的路由出口）
+- `node-ip`: 每个节点设置为自己的 Tailscale IP
+- `advertise-address` (server): `100.102.140.59`
 
-### Idempotent Install
-Both server and agent roles check runtime health before install:
-- `systemctl is-active k3s` / `k3s-agent` → if active + API reachable → skip install
-- Only renders config templates + ensures service started
-- Uses installer script from mirror (CN: `rancher-mirror.rancher.cn`, overseas: `get.k3s.io`)
+### 关键配置文件路径
 
-### Containerd Image Pull Proxy
-```yaml
-k3s_containerd_http_proxy: "http://gtr.tail414c32.ts.net:7890"  # default in group_vars
-k3s_containerd_https_proxy: "http://gtr.tail414c32.ts.net:7890"
-k3s_containerd_no_proxy: "localhost,127.0.0.1,10.0.0.0/8,100.0.0.0/8"
-```
-Per-host overrides: GTR uses `127.0.0.1:7890` (localhost mihomo), aliyun uses Aliyun Docker mirror (`quqdq6jy.mirror.aliyuncs.com`), remote_proxy has no proxy.
-
-### Node Labels
-```yaml
-gtr.io/region: cn|us
-gtr.io/visibility: public|internal
-```
+| 文件 | 说明 |
+|------|------|
+| `edge/ansible/group_vars/all/public.yml` | 共享变量，第 112-132 行是 k3s 配置 |
+| `edge/ansible/host_vars/aliyun/public.yml` | aliyun 特有变量（server IP, registry mirrors） |
+| `edge/ansible/host_vars/gtr/public.yml` | GTR 特有变量（localhost proxy） |
+| `edge/ansible/host_vars/tencent.yml` | tencent 特有变量 |
+| `edge/ansible/roles/k3s-server/templates/config.yaml.j2` | Server config 模板 |
+| `edge/ansible/roles/k3s-agent/templates/config.yaml.j2` | Agent config 模板（仅 4 行） |
+| `edge/ansible/roles/k3s-prereq/defaults/main.yml` | 预置包/模块/sysctl 清单 |
+| `edge/ansible/roles/k3s-prereq/tasks/main.yml` | 预置安装逻辑 |
+| `mihomo/ansible/group_vars/all/public.yml` | Mihomo 配置（DNS、TUN） |
+| `docs/issues/007-k3s-flannel-tailscale-crashloop.md` | 历史 crashloop 诊断文档 |
 
 ---
 
-## 2. Tailscale References
+## 二、跨节点网络不通的潜在根因（按可能性排序）
 
-### Tailscale Network: `tail414c32.ts.net`
+### ⚠️ 根因 1（最可能）：WireGuard-over-WireGuard 双重封装 + MTU 断裂
 
-**All nodes are on the same Tailnet:**
-| Host | Tailscale IP | Ansible Connection |
-|------|-------------|-------------------|
-| GTR | 100.121.0.67 | `gtr.tail414c32.ts.net` (DNS name) |
-| aliyun | 100.102.140.59 | Direct IP |
-| tencent | 100.99.48.76 | Direct IP |
-| remote_proxy | 100.66.156.40 | Direct IP |
+**问题机制：**
 
-Inventory uses **Tailscale IPs exclusively** for ansible connectivity:
 ```
-[edge_remote_proxy]
-remote_proxy ansible_host=100.66.156.40
-
-[edge_aliyun]
-aliyun ansible_host=100.102.140.59
-
-[edge_tencent]
-tencent ansible_host=100.99.48.76
-
-[gtr_core]
-gtr ansible_host=gtr.tail414c32.ts.net
+Pod A (10.60.1.2)
+  └→ [flannel.wg] → WireGuard 封装 (加 60 bytes 头)
+       └→ 目标: 100.99.48.76:51820 (Tailscale IP + Flannel WG 端口)
+            └→ [tailscale0] → WireGuard 再次封装 (加 80 bytes 头)
+                 └→ 目标: tencent 公网 IP
+                      └→ [tailscale0] decap → [flannel.wg] decap → Pod B (10.60.2.3)
 ```
 
-### Tailscale Services (GTR)
-Bare-metal services exposed via `tailscale serve`:
-| Service | MagicDNS Name | Local Target | ACL Protection |
-|---------|---------------|-------------|----------------|
-| corp-finance-monitor | `corp-finance-monitor.tail414c32.ts.net` | `127.0.0.1:8190` | autogroup:member |
-| Grafana | `grafana.tail414c32.ts.net` | `localhost:3000` | autogroup:member |
-| Mihomo API | `mihomo-api.tail414c32.ts.net` | `127.0.0.1:9090` | autogroup:admin + Bearer Token |
-| VictoriaMetrics | `victoriametrics.tail414c32.ts.net` | `localhost:8428` | tag:private |
-| VictoriaLogs | `victorialogs.tail414c32.ts.net` | `localhost:8429` | tag:private |
-| Envoy Admin | `envoy-admin.tail414c32.ts.net` | `127.0.0.1:9901` | autogroup:admin |
+- Tailscale0 默认 MTU = **1280**
+- Flannel WireGuard 添加 ~60 bytes 头
+- 所以 Pod 实际可用 MTU = 1280 - 60 = **~1220**（甚至更少，取决于 IP/UDP 头叠加）
+- 标准以太网 MTU = 1500，TCP 通常使用 MSS = 1460
+- 应用层发 1460 bytes 的 TCP 数据包 → IP 层分片或 PMTUD 失败 → 连接黑洞
 
-Key quote from `tailscale-services/README.md`:
-> **TailVIP 与 Envoy 无冲突**：Tailscale Services 使用独立虚拟 IP，Envoy 监听 `0.0.0.0:443` 在主机网络层，两者互不干扰。
+**受影响流量：** 所有跨节点的 Pod 间 TCP 连接。大包（>1220 bytes）会被静默丢弃。
 
-### Tailscale Exit Node (GTR)
-GTR is configured as a Tailscale exit node. Routing:
-```
-Tailnet device → GTR (advertise-exit-node)
-  → Mihomo TUN (mixed stack, auto-route)
-    → Proxy groups (chain/direct depending on destination)
-```
-Mihomo TUN config excludes Tailscale addresses:
+**证据：** tailscale0 的 MTU 为 1280 是 Tailscale 默认值（在 `tailscale up` 时未指定 `--mtu` 的情况下）。Flannel WireGuard 封装头约 60 bytes。Pod 的 `subnet.env` 如无覆盖则默认 1500。
+
+### ⚠️ 根因 2：Mihomo TUN 模式拦截 K3s Pod 流量（GTR 节点独有）
+
+**问题机制：**
+
+Mihomo TUN 的 `route-exclude-address` 列表：
 ```yaml
 route-exclude-address:
   - 192.168.0.0/16
   - 10.0.0.0/8
   - 172.16.0.0/12
-  - 100.64.0.0/10        # ← Tailscale CGNAT range
+  - 100.64.0.0/10
+  - "::/0"
 ```
 
-### Tailscale Operator (K3s)
-Planned but not yet installed — see `docs/issues/002-argocd-sealed-secrets-tailscale-operator.md`.
+- `10.0.0.0/8` 包括 `10.60.0.0/16`（K3s Pod CIDR）！
+- 这意味着 GTR 上的 K3s Pod 发送到其他节点 Pod（10.60.x.x）的流量**只会被路由排除，不进入 TUN**
+- 但 Tats 上排除路由 ≠ 不需要正确路由。排除只是说"不劫持到 TUN 接口"，但系统路由表必须正确指向 Flannel 的 WireGuard 接口
+- 如果 Flannel 的 WireGuard 路由不存在或错误，排除路由的 Pod CIDR 流量会走**默认路由** → 丢包
 
-### nftables Routing Fixes
-A `tailscale-exitnode-fix.service` injects:
-1. MASQUERADE rule in POSTROUTING (dynamic WAN detection)
-2. Policy route: `from 100.64.0.0/10 lookup 2022` → Mihomo TUN
-3. Monitor timer: `tailscale-exitnode-monitor.timer` (30s interval, auto-fix)
+**关键测试：** 在 GTR 上 `ip route show | grep 10.60` 查看 Flannel 子网路由是否正确指向 `flannel.wg` 接口。
 
-This was necessary because Docker's nftables rules prevented Tailscale from properly installing `ts-postrouting` chain references.
+**潜在冲突：**
+- Tailscale 有自己的路由表（table 52）
+- Flannel 在 main 表中操作路由
+- Mihomo TUN 在 main 表中添加策略路由
+
+### ⚠️ 根因 3：Flannel WireGuard 在 /32 地址上的路由问题
+
+**问题机制：**
+
+- Flannel `wireguard-native` backend 需要在每个节点上建立到其他节点的 WireGuard peer
+- 每个 peer 的 Endpoint 是目标节点的 `node-ip`（Tailscale IP，如 `100.102.140.59`）
+- Tailscale IP 是 **/32 点对点地址**，不是标准可路由广播地址
+- Flannel WireGuard 需要发送 UDP 包到 `100.99.48.76:51820`，这个包必须被正确路由到 tailscale0
+- 如果 tailscale0 的路由优先级、策略或 nftables 规则干扰，WireGuard 握手会失败
+- Flannel WG peer 建立失败 → Pod 子网不通
+
+**验证命令（在各节点执行）：**
+```bash
+# 检查 Flannel WireGuard 接口
+ip link show flannel.wg 2>/dev/null || ip link show flannel.1 2>/dev/null
+
+# 检查 wireguard peer 状态
+wg show flannel.wg 2>/dev/null || echo "no flannel.wg"
+
+# 检查 flannel 子网路由
+ip route show | grep 10.60
+
+# 检查 tailscale 路由表
+ip route show table 52
+```
+
+### ⚠️ 根因 4：Flannel `net.bridge.bridge-nf-call-iptables=1` 对 WireGuard 接口的副作用
+
+- K3s prereq 设置了 `net.bridge.bridge-nf-call-iptables=1`
+- 这对 bridge 设备有用，但 WireGuard 接口**不是 bridge**
+- nftables/iptables 的 FORWARD 链中存在的 DOCKER 遗留规则（见 issue #008）可能仍然存在
+- GTR 上 Docker 已卸载，但 `nft` 规则中的 `DOCKER-FORWARD`、`FLANNEL-FWD` 等链可能仍有引用
+- 当 Pod 流量经过 FORWARD 链时，被跳转到 DOCKER 规则造成额外延迟或丢弃
+
+### ⚠️ 根因 5：GTR 旧 K3s server 残留 vs 新的 K3s agent
+
+**历史背景：**
+- 原拓扑：GTR = K3s server（已崩溃 crashloop，问题在 issue #007 分析）
+- 新拓扑：aliyun = K3s server, GTR = K3s agent
+- 迁移执行后，GTR 上的旧 `k3s` server service 需要被完全停止并清理
+
+**可能的问题：**
+- GTR 上旧 K3s server 的 `k3s-killall.sh` 未执行
+- 残留的 `flannel.1`（VXLAN 接口）与新的 `flannel.wg`（WireGuard 接口）冲突
+- 残留的 iptables/nftables 规则（FLANNEL-POSTRTG, FLANNEL-FWD）与新的 Flannel 规则冲突
+- `/var/lib/rancher/k3s/server/` 中的数据未清理
+
+### ⚠️ 根因 6：Cluster DNS (10.61.0.10) 与 Mihomo DNS (100.121.0.67:53) 的交互
+
+- GTR 上 Mihomo DNS 监听 `100.121.0.67:53`，enhanced-mode: `redir-host`
+- K3s Cluster DNS 在 `10.61.0.10`，是 CoreDNS Service 的 Cluster IP
+- 当 GTR 上的 Pod 解析 `svc.cluster.local` 时，DNS 请求到 `10.61.0.10` → CoreDNS
+- CoreDNS 需要解析外部域名时，会向节点 `/etc/resolv.conf` 指定的上游 DNS 查询
+- 如果 `resolv.conf` 被 Mihomo TUN 的 DNS hijack 劫持 → CoreDNS 的外部查询可能被 Mihomo 重定向
+- 虽然 10.0.0.0/8 在 route-exclude 中，但 DNS 是应用层（UDP 53），可能被 Mihomo 的 `dns-hijack: any:53` 捕获
 
 ---
 
-## 3. Kubernetes Service Types
+## 三、建议的故障排查步骤
 
-**No Kubernetes Service manifests exist in this repository.**
+### 步骤 1：验证集群基本健康
 
-This repo (`nas-deployment-public`) owns only **host-level infrastructure** (K3s platform, edge Envoy, tailscale config, VM metrics/logs). Kubernetes resource manifests (Deployments, Services, Ingresses, etc.) are owned by **application repositories** under the target architecture.
+在 aliyun server 上执行（SSH 可通过 CI 或直接通过 Tailscale）：
 
-The planned architecture from `docs/issues/003-corp-finance-monitor-helm-migration.md`:
-> - Model frontend/backend Services and workloads
-> - Register the app in Argo CD from `nas-deployment`
+```bash
+# 节点状态
+k3s kubectl get nodes -o wide
 
-So `nas-deployment` will hold **Argo CD Application registration** YAMLs (not raw k8s Services), while apps hold their own Helm charts.
+# Pod 状态（检查 kube-system 核心组件）
+k3s kubectl get pods -n kube-system -o wide
 
-### Built-in K3s k8s Services Disabled
-```yaml
-k3s_disable_components:
-  - traefik        # ← Ingress controller
-  - servicelb      # ← LoadBalancer Service controller
+# Flannel Pod 日志
+k3s kubectl -n kube-system logs -l k8s-app=flannel --tail=50
 ```
-This is deliberate — traffic goes through the host-level **Envoy** proxy instead.
 
-### Relevant: K3s Service CIDR
-```yaml
-k3s_service_cidr: 10.61.0.0/16
-k3s_cluster_dns: 10.61.0.10
+### 步骤 2：验证 Flannel WireGuard 隧道
+
+**在 aliyun 上：**
+```bash
+# 确认 Flannel WG 接口存在
+ip link show flannel.wg
+wg show flannel.wg
+
+# 检查 peer 列表（应该有 gtr 和 tencent 的 peer）
+# 检查每个 peer 的 endpoint、allowed-ips、latest-handshake
+
+# 检查路由
+ip route show | grep 10.60
+
+# MTU 确认
+ip link show flannel.wg | grep mtu
 ```
-These are set in `group_vars/all/public.yml` and wired into `config.yaml.j2`.
+
+**在 gtr 和 tencent 上重复同样的检查。**
+
+### 步骤 3：MTU 测试
+
+```bash
+# 在 aliyun 部署一个测试 Pod
+k3s kubectl run test-pod --image=alpine -- sleep 3600
+
+# 从不同节点测试 MTU（在 aliyun / gtr / tencent 上分别部署并互相 ping）
+k3s kubectl exec -it test-pod -- ping -c 3 -M do -s 1200 <other-pod-ip>
+k3s kubectl exec -it test-pod -- ping -c 3 -M do -s 1400 <other-pod-ip>
+k3s kubectl exec -it test-pod -- ping -c 3 -M do -s 1472 <other-pod-ip>
+
+# -M do = DF flag set, -s = payload size
+# 如果 1472 失败但 1200 成功，证明 MTU 问题
+```
+
+### 步骤 4：nftables/iptables 规则检查
+
+**特别是 GTR 节点（曾运行 Docker，可能有残留规则）：**
+```bash
+# 检查 nat 表
+nft list table ip nat
+
+# 检查 filter 表 FORWARD 链
+nft list chain ip filter FORWARD
+
+# 检查是否有 FLANNEL 链和 DOCKER 链
+nft list table ip filter | grep -E "chain (FLANNEL|DOCKER)"
+
+# 检查 conntrack 对 WireGuard 流量的处理
+conntrack -L | grep 51820
+```
+
+### 步骤 5：检查 GTR 旧 K3s server 残留
+
+```bash
+# 检查是否还有 k3s server 进程
+systemctl status k3s
+ps aux | grep k3s
+
+# 检查残留接口
+ip link show flannel.1 2>/dev/null && echo "OLD VXLAN interface still exists!"
+ip link show cni0 2>/dev/null
+
+# 检查残留数据
+ls -la /var/lib/rancher/k3s/server/ 2>/dev/null
+
+# check current k3s-agent
+systemctl status k3s-agent
+journalctl -u k3s-agent --no-pager -n 50
+```
+
+### 步骤 6：Flannel WireGuard 端口可达性
+
+```bash
+# Flannel WG 默认端口是 51820（UDP）
+# 测试节点间 51820 端口是否可达（通过 Tailscale IP）
+# 在 aliyun 上：
+nc -zu -w 3 100.99.48.76 51820
+nc -zu -w 3 100.121.0.67 51820
+
+# 在 gtr 上：
+nc -zu -w 3 100.102.140.59 51820
+nc -zu -w 3 100.99.48.76 51820
+
+# 在 tencent 上：
+nc -zu -w 3 100.102.140.59 51820
+nc -zu -w 3 100.121.0.67 51820
+```
+
+> 如果 `nc` 不可用，可用 `nmap` 或查看 `wg show` 的 `latest-handshake` 时间戳。
 
 ---
 
-## 4. Service Mesh / Ingress Patterns
+## 四、修复方案候选
 
-### Host-Level: Envoy Proxy (Primary Ingress)
+### 方案 A：Flannel 改用 `host-gw` backend（推荐优先尝试）
 
-**Every edge node runs Envoy** as the unified ingress:
-- Binds `0.0.0.0:443` (TLS listener) + `0.0.0.0:80` (HTTP listener)
-- Uses file-based dynamic config (LDS/CDS from `/etc/envoy/dynamic_config/`)
-- Listener modes: `http_plaintext`, `tls_terminate_http`, `tls_passthrough`
-
-**Edge Envoy Route Model** (`envoy_domain_routes` in group_vars):
 ```yaml
-envoy_domain_routes:
-  - name: node_exporter_metrics
-    mode: http_plaintext
-    path_prefix: /metrics
-    cluster: node_exporter
-  - name: envoy_admin_metrics
-    mode: http_plaintext
-    path_prefix: /stats/prometheus
-    cluster: envoy_admin
-  # remote_proxy ONLY:
-  - name: shadowtls_passthrough
-    mode: tls_passthrough
-    sni_domains: ["www.microsoft.com", "*.microsoft.com"]
-    cluster: shadow_tls_server
+# group_vars/all/public.yml
+k3s_flannel_backend: host-gw
 ```
 
-**Pre-defined clusters** (from `cds.yaml.j2`):
-| Cluster | Target | Port |
-|---------|--------|------|
-| `shadow_tls_server` | 127.0.0.1 | 8443 |
-| `node_exporter` | 127.0.0.1 | 9100 |
-| `envoy_admin` | 127.0.0.1 | 9901 |
-| Additional via `envoy_additional_clusters` | configurable | configurable |
+- **原理：** 所有节点通过 Tailscale 三层可达，`host-gw` 只需添加静态路由，无需额外封装
+- **优点：** 零封装开销，无 MTU 问题，无需 WireGuard 握手
+- **缺点：** 无加密（但已有一层 Tailscale 加密），不支持跨网段自动路由
+- **适用性：** 本次拓扑中所有节点都在 Tailscale 同一子网，完全满足条件
 
-**Request flow for external traffic:**
-```
-Internet → Edge Node (66.154.100.187:80/443)
-  → Envoy (LDS: TLS inspect + path routing)
-    → node_exporter (/metrics) / shadow-tls-server (SNI: microsoft.com)
-```
+### 方案 B：Flannel 显式限制 MTU
 
-**Request flow for internal traffic (Tailnet):**
-```
-Tailscale device → gtr.tail414c32.ts.net:8428/8429/3000
-  → Tailscale serve (virtual IP)
-    → localhost service (direct)
-```
+保留 `wireguard-native` 但显式设置 Flannel MTU：
 
-### Legacy: Shadowsocks + Shadow-TLS (Deprecated)
-The old proxy stack is being superseded by Mihomo. The `shadowtls_passthrough` route in remote_proxy's Envoy still forwards traffic to `shadow-tls-server` for legacy compatibility.
-
-### Envoy Administration
-- Admin interface: `127.0.0.1:9901`
-- Access logs: `/var/log/envoy/access.log`
-- Config validation: `envoy --mode validate -c /etc/envoy/envoy.yaml`
-- Systemd-managed, `CAP_NET_BIND_SERVICE` capability
-
-### Envoy Resource Constraints
 ```yaml
-overload_manager:
-  resource_monitors:
-    - name: fixed_heap
-      max_heap_size_bytes: 2147483648   # 2GB
+# Flannel 配置中加 MTU
+flannel-backend: wireguard-native
+# 或在 K3s 启动参数中加
+--flannel-backend=wireguard-native --flannel-mtu=1200
 ```
 
-### Mihomo Proxy (TUN mode on GTR)
-Mihomo operates at the **host network layer** with TUN mode, not as a Kubernetes mesh:
-- Mixed HTTP/SOCKS proxy on port 7890
-- TUN mode with `auto-route: true` for intercepting traffic
-- Excludes Tailscale/LAN CIDRs from TUN
-- DNS hijack on `any:53`
-- Proxy groups: chain routing via self-hosted nodes (ShadowTLS/Hysteria2) → subscription nodes
-- Tailscale traffic rules (hard-coded in Mihomo config):
-  ```
-  - DOMAIN-SUFFIX,ts.net,DIRECT
-  - DOMAIN-SUFFIX,tailscale.com,DIRECT
-  - DOMAIN-SUFFIX,tail414c32.ts.net,DIRECT
-  - IP-CIDR,100.64.0.0/10,DIRECT
-  ```
+> K3s 支持 `--flannel-mtu` 参数，但需要在 installer 脚本中传递到 K3s exec 参数。
+
+### 方案 C：将 Flannel backend 改为 VXLAN（非 tailscale0）
+
+```yaml
+k3s_flannel_backend: vxlan
+# 需要指定正确的接口（tailscale0 在 issue #007 被证明有 crashloop 问题）
+# 但用 vxlan 不加 flannel-iface 的话，Flannel 会自动选 eth0（公网 IP），Pod 流量走公网明文
+```
+
+### 方案 D：Tailscale subnet routes + 禁用 Flannel
+
+```yaml
+k3s_disable_network_policy: true
+# 在 Tailscale 上为各节点设置 subnet routes
+# 但需要大幅修改架构，不推荐
+```
+
+### 推荐优先级
+
+1. **先执行故障排查步骤 1-6**，确认确切根因
+2. 如果确定是 **MTU 断裂**（步骤 3 确认）：采用**方案 A（host-gw）**
+3. 如果确定是 **WireGuard 握手失败**（步骤 6 确认）：检查防火墙规则，采用**方案 A（host-gw）**
+4. 如果确定是 **GTR 旧 server 残留**：执行 issue #007 中的清理步骤
+5. 如果确定是 **Mihomo TUN 拦截**：在 Mihomo config 中明确添加 `10.60.0.0/16` 到 `route-exclude-address`
 
 ---
 
-## 5. Network Architecture
+## 五、关键文件索引
 
-### Infrastructure Topology
-
-```
-                  Internet
-                     │
-        ┌────────────┼────────────┐
-        │            │            │
-   remote_proxy   aliyun       tencent
-   66.154.100.187  47.120.46.128 129.211.12.63
-        │            │            │
-        │  Tailscale (encrypted mesh via tail414c32.ts.net)
-        └────────────┼────────────┘
-                     │
-                   GTR (Core)
-              192.168.31.59 (LAN)
-              100.121.0.67 (Tailscale)
-```
-
-### Data Flows
-
-**Metrics (public edge → GTR VictoriaMetrics):**
-```
-Edge node_exporter (127.0.0.1:9100)
-  → Edge Envoy (/metrics path, 0.0.0.0:80)
-    → Prometheus scrape job
-      → GTR tail414c32.ts.net:8428
-```
-
-**Logs (edge → GTR VictoriaLogs):**
-```
-Edge Envoy access.log
-  → Edge Vector (parser/transform)
-    → GTR tail414c32.ts.net:8429 (via Tailscale)
-```
-
-**Proxy traffic (GTR → Internet):**
-```
-GTR applications → Mihomo mixed proxy (127.0.0.1:7890)
-  → TUN mode routes exclude Tailscale/private
-  → Proxy chain (ShadowTLS/Hysteria2 → subscription nodes)
-    → remote_proxy:443 (shadow-tls SNI: www.microsoft.com)
-      → Internet
-```
-
-**Tailscale exit node (client → GTR → Internet):**
-```
-Client (exit-node=gtr) → Tailscale encrypted tunnel
-  → GTR tailscale0 → Mihomo TUN
-    → nftables MASQUERADE + policy route (100.64.0.0/10 → table 2022)
-      → Mihomo proxy groups
-        → Internet
-```
-
-### Edge Scrape Targets (VictoriaMetrics)
-```yaml
-edge_proxy_vm_scrape_jobs:
-  - job_name: edge_proxy_aliyun
-    target: 47.120.46.128:80        # Public IP, Envoy metrics
-  - job_name: edge_proxy_remote_proxy
-    target: 66.154.100.187:80        # Public IP, Envoy metrics
-  - job_name: edge_proxy_tencent
-    target: 129.211.12.63:80         # Public IP, Envoy metrics
-```
-
-### Port Registry (`.resource-manifest.yml`)
-```yaml
-ports:
-  - 80/tcp → envoy (HTTP)
-  - 443/tcp → envoy-tls (HTTPS)
-  - 3000/tcp → grafana
-  - 7890/tcp → mihomo
-  - 8428/tcp → victoriametrics
-  - 8429/tcp → victorialogs
-  - 9090/tcp → mihomo-api
-  - 9100/tcp → node_exporter
-  - 9428/tcp → victoriatraces
-  - 9901/tcp → envoy-admin
-```
-
-### DNS Architecture
-- **Tailscale MagicDNS:** `*.tail414c32.ts.net` for all tailnet services
-- **GTR Core:** Reachable as `gtr.tail414c32.ts.net`
-- **Mihomo DNS:** `100.121.0.67:53` (GTR's Tailscale IP, enhanced-mode: redir-host)
-- **No public DNS records** managed in this repo — all exposure is via Tailscale MagicDNS
-- Service DNS: `10.61.0.10` (K3s cluster DNS for internal k8s service discovery)
-
-### SSH Access
-All nodes use SSH via their Tailscale IPs with `ci` user. No public SSH endpoints.
+| 文件路径 | 行号 | 内容相关 |
+|----------|------|---------|
+| `edge/ansible/group_vars/all/public.yml` | L112-132 | K3s 全局变量（CIDR, flannel-backend, containerd proxy） |
+| `edge/ansible/group_vars/all/public.yml` | L117 | `k3s_flannel_backend: wireguard-native` |
+| `edge/ansible/host_vars/aliyun/public.yml` | L6-9 | aliyun server vars: `k3s_server_tailscale_ip`, `k3s_server_tls_sans` |
+| `edge/ansible/host_vars/aliyun/public.yml` | L12-15 | aliyun 的 containerd registry mirrors（阿里云镜像） |
+| `edge/ansible/host_vars/gtr/public.yml` | L4-6 | GTR 使用 localhost proxy（`127.0.0.1:7890`） |
+| `edge/ansible/roles/k3s-server/templates/config.yaml.j2` | L1-16 | Server config: `flannel-backend`, `cluster-cidr`, `service-cidr`, `advertise-address`, `node-ip` |
+| `edge/ansible/roles/k3s-server/tasks/main.yml` | L3-9 | 断言 `k3s_cluster_token` |
+| `edge/ansible/roles/k3s-server/tasks/main.yml` | L12-30 | 读取 Tailscale IP, 渲染 config.yaml + registries.yaml |
+| `edge/ansible/roles/k3s-agent/templates/config.yaml.j2` | L1-4 | Agent config: `server: https://100.102.140.59:6443`, `node-ip` |
+| `edge/ansible/roles/k3s-agent/tasks/main.yml` | L17-20 | Agent 通过 `tailscale ip -4` 获取 node-ip |
+| `edge/ansible/roles/k3s-prereq/defaults/main.yml` | L16-20 | sysctl: `net.ipv4.ip_forward=1`, `bridge-nf-call-iptables=1` |
+| `edge/ansible/roles/k3s-prereq/defaults/main.yml` | L10-12 | 内核模块: `wireguard`, `overlay`, `br_netfilter` |
+| `edge/ansible/inventory-edge.ini` | L1-12 | 所有节点经 Tailscale IP 连接 |
+| `edge/ansible/deploy-gtr-k3s-agent.yml` | L3 | **只部署到** `gtr_core:edge_tencent`，不含 `edge_remote_proxy` |
+| `mihomo/ansible/group_vars/all/public.yml` | L40 | `mihomo_dns_listen: 100.121.0.67:53` |
+| `mihomo/ansible/group_vars/all/public.yml` | L41 | `mihomo_enhanced_mode: redir-host` |
+| `mihomo/ansible/roles/mihomo/templates/config.yaml.j2` | L30-34 | `route-exclude-address` 含 `10.0.0.0/8`（涵盖 `10.60.0.0/16`）|
+| `mihomo/ansible/roles/mihomo/templates/config.yaml.j2` | L27 | `dns-hijack: any:53` |
+| `docs/issues/007-k3s-flannel-tailscale-crashloop.md` | 全文 | 旧 crashloop 分析（flannel-iface: tailscale0 导致 kube-proxy 崩溃） |
+| `docs/issues/008-docker-nftables-conflict-analysis.md` | 全文 | Docker nftables 残留规则分析 |
 
 ---
 
-## Key Findings Summary
+## 六、已知约束和注意事项
 
-### K3s-Specific vs. Running Alongside K3s
+1. **`remote_proxy` 不是 K3s 节点** — 如果有 Pod 需要调度到 remote_proxy，需要修改 `deploy-gtr-k3s-agent.yml` 增加 `edge_remote_proxy` 组，并添加对应 host_vars。
 
-| Component | Nature | Relationship to K3s |
-|-----------|--------|---------------------|
-| **K3s** | K3s-native | Core platform (k3s.io) |
-| **Flannel (`wireguard-native`)** | K3s-native | Built-in CNI, configured in K3s config |
-| **Traefik** | Disabled (explicitly) | Was built-in, now replaced by Envoy |
-| **ServiceLB** | Disabled (explicitly) | Was built-in K8s LoadBalancer, not used |
-| **Cloud Controller Manager** | Disabled | No cloud-provider integration |
-| **Envoy (edge nodes)** | Running alongside | Host-level, not in K8s. Entry point for all external traffic |
-| **Mihomo (GTR)** | Running alongside | Host-level TUN proxy, not in K8s. Exit node routing |
-| **Tailscale** | Running alongside | Host-level. Tailscale operator planned but not installed |
-| **VictoriaMetrics/Logs/Traces** | Running alongside | Host-level services, not in K8s |
-| **Grafana** | Running alongside | Host-level, not in K8s |
-| **Vector** | Running alongside | Host-level log shipper, not in K8s |
-| **Argo CD** | Planned for K3s | Will be the GitOps reconciler inside K3s |
-| **Sealed Secrets** | Planned for K3s | Will handle secrets inside K3s |
-| **Tailscale Operator** | Planned for K3s | Will expose K8s services via Tailnet |
+2. **Flannel 从 issue #007 的 `flannel-iface: tailscale0` 改为现在的 `wireguard-native` 无 `flannel-iface`** — 不再使用 tailscale0 作为 Flannel 接口，但 `node-ip` 仍为 Tailscale IP，Flannel WG 隧道建在 Tailscale IP 之上。
 
-### Gaps & Open Questions
+3. **K3s 禁用了 `servicelb` 和 `traefik`** — LoadBalancer Service 和 Ingress Controller 都不可用。服务暴露走 Tailscale Operator（已部署但 SealedSecret OAuth 可能未就位）。
 
-1. **No K8s Service manifests exist** — all actual Kubernetes resources live in application repos. This repo only manages the K3s cluster + Argo CD Application CRDs.
-2. **Traffic model: Envoy → K3s is undefined** — Currently Envoy routes to host-level services (127.0.0.1). How Envoy will route into K3s pods (NodePort? HostPort? Tailscale Operator?) is not implemented.
-3. **K3s `servicelb` is disabled** — So there's no LoadBalancer Service integration. Tailscale Operator will be the ingress mechanism.
-4. **Docker was uninstalled** (per issue #008 analysis, GTR: Docker removed 2026-06-07). K3s containerd is the only container runtime.
-5. **No service mesh** — the architecture is "Envoy at edge + K3s for orchestration". No Istio/Linkerd/service mesh layer.
-6. **Remote proxy's k3s agent** (`100.66.156.40`) has no explicit node labels or container registry mirror config — may need attention.
-7. **Argo CD + Sealed Secrets + Tailscale Operator** installation docs exist (issue #002) but implementation status is unclear — need to check if the actual install playbooks/scripts exist.
-8. **The `flannel-iface: tailscale0` crashloop** from issue #007 has been fixed by switching to `flannel-backend: wireguard-native`, but the historical crashloop data suggests careful testing is needed for the current topology.
-9. **Mihomo DNS** is set to GTR's Tailscale IP (`100.121.0.67:53`) — this routes DNS through the proxy chain. How this interacts with `k3s_cluster_dns: 10.61.0.10` on K3s nodes is worth clarifying.
+4. **GTR 曾运行旧 K3s server（已 crashloop）** — 迁移到 aliyun server 后，GTR 上的旧 k3s server 需要完全清理。但 deploy playbook 的 idempotency 检查（`systemctl is-active k3s-agent`）只在已有 agent 运行时跳过安装，不会主动清理旧 server 残留。
 
-### Start Here
-To understand the full deployment flow, begin with:
-1. `.github/workflows/deploy-infra.yml` — CI pipeline showing deployment order and dependencies
-2. `edge/ansible/group_vars/all/public.yml` — Central vars file that ties everything together
-3. `k3s/README.md` — K3s cluster topology and deployment docs
-4. `tailscale-services/README.md` — How services are exposed internally
+5. **Mihomo TUN 运行在 GTR 上** — 它劫持所有非排除地址的流量。K3s Pod CIDR `10.60.0.0/16` 被 `10.0.0.0/8` 排除规则覆盖，所以不被 TUN 劫持。但 K3s Service CIDR `10.61.0.0/16` **也在** `10.0.0.0/8` 范围内，同样被排除。所以 K3s 内部流量理论上不会被 Mihomo 劫持，但需要验证路由表正确。
+
+6. **containerd image pull proxy** 已配置 — 非 GTR 节点通过 `gtr.tail414c32.ts.net:7890`（Mihomo HTTP proxy）拉取镜像，GTR 用 `127.0.0.1:7890`，aliyun 用阿里云镜像。这不应影响数据面网络。
+
+7. **Docker 已于 2026-06-07 从 GTR 卸载** — 但 nftables 中的 DOCKER 遗留规则可能仍然存在（`DOCKER-FORWARD`, `DOCKER-CT` 等链），见 issue #008。这些规则可能干扰 Flannel 的 FORWARD 处理。

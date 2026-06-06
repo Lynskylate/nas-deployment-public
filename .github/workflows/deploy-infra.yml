@@ -42,7 +42,8 @@ jobs:
       target: ${{ steps.resolve.outputs.target }}
       run_gtr: ${{ steps.resolve.outputs.run_gtr }}
       run_edge: ${{ steps.resolve.outputs.run_edge }}
-      run_k3s: ${{ steps.resolve.outputs.run_k3s }}
+      run_k3s_server: ${{ steps.resolve.outputs.run_k3s_server }}
+      run_k3s_agent: ${{ steps.resolve.outputs.run_k3s_agent }}
       run_tunnel: ${{ steps.resolve.outputs.run_tunnel }}
       run_validate_contract: ${{ steps.resolve.outputs.run_validate_contract }}
       edge_targets: ${{ steps.resolve.outputs.edge_targets }}
@@ -109,7 +110,8 @@ jobs:
 
           run_gtr=false
           run_edge=false
-          run_k3s=false
+          run_k3s_server=false
+          run_k3s_agent=false
           run_tunnel=false
           run_validate_contract=false
           edge_targets='[]'
@@ -118,7 +120,8 @@ jobs:
             all)
               run_gtr=true
               run_edge=true
-              run_k3s=true
+              run_k3s_server=true
+              run_k3s_agent=true
               run_tunnel=true
               run_validate_contract=true
               edge_targets='["remote_proxy","aliyun","tencent"]'
@@ -130,7 +133,8 @@ jobs:
             gtr_k3s_platform)
               run_gtr=true
               run_edge=true
-              run_k3s=true
+              run_k3s_server=true
+              run_k3s_agent=true
               edge_targets='["aliyun","tencent"]'
               ;;
             edge_remote_proxy)
@@ -155,7 +159,8 @@ jobs:
             echo "target=$target"
             echo "run_gtr=$run_gtr"
             echo "run_edge=$run_edge"
-            echo "run_k3s=$run_k3s"
+            echo "run_k3s_server=$run_k3s_server"
+            echo "run_k3s_agent=$run_k3s_agent"
             echo "run_tunnel=$run_tunnel"
             echo "run_validate_contract=$run_validate_contract"
             echo "edge_targets=$edge_targets"
@@ -204,12 +209,12 @@ jobs:
         run: ansible-playbook -i inventory-edge.ini deploy-resource-manifest.yml -v
 
       - name: Deploy AI tools and Slock daemon
-        if: needs.preflight.outputs.run_k3s != 'true'
+        if: needs.preflight.outputs.run_k3s_agent != 'true'
         working-directory: edge/ansible
         run: ansible-playbook -i inventory-edge.ini deploy-gtr-ai-tools.yml -v
 
       - name: Verify GTR services
-        if: needs.preflight.outputs.run_k3s != 'true'
+        if: needs.preflight.outputs.run_k3s_agent != 'true'
         run: |
           ssh root@gtr.tail414c32.ts.net bash <<'VERIFY'
             set -e
@@ -278,11 +283,11 @@ jobs:
         name: Cleanup vault artifacts
         run: bash .github/scripts/cleanup-vault.sh
 
-  deploy-k3s-platform:
-    needs: [preflight, deploy-gtr, deploy-edge]
-    if: needs.preflight.outputs.run_k3s == 'true'
+  deploy-k3s-server:
+    needs: [preflight, deploy-gtr]
+    if: needs.preflight.outputs.run_k3s_server == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     environment: production
     steps:
       - uses: actions/checkout@v6
@@ -304,20 +309,58 @@ jobs:
       - name: Add GTR host alias
         run: echo "${{ env.GTR_TAILSCALE_IP }} gtr gtr.tail414c32.ts.net" | sudo tee -a /etc/hosts
 
-      - name: Deploy K3s platform bootstrap
+      - name: Deploy K3s server on aliyun
         working-directory: edge/ansible
-        run: ansible-playbook -i inventory-edge.ini deploy-gtr-k3s-platform.yml -v
+        run: ansible-playbook -i inventory-edge.ini deploy-gtr-k3s-server.yml -v
 
-      - name: Verify K3s platform bootstrap
+      - name: Verify K3s server
         working-directory: edge/ansible
-        run: ansible-playbook -i inventory-edge.ini verify-gtr-k3s-platform.yml -v
+        run: ansible-playbook -i inventory-edge.ini verify-gtr-k3s-server.yml -v
+
+      - if: always()
+        name: Cleanup vault artifacts
+        run: bash .github/scripts/cleanup-vault.sh
+
+  deploy-k3s-agent:
+    needs: [preflight, deploy-k3s-server, deploy-edge]
+    if: needs.preflight.outputs.run_k3s_agent == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - uses: actions/checkout@v6
+
+      - id: bootstrap
+        uses: ./.github/actions/bootstrap-deploy-env
+        with:
+          vault_repo_slug: ${{ vars.VAULT_REPO_SLUG }}
+          vault_repo_ssh_key: ${{ secrets.VAULT_REPO_SSH_KEY }}
+          sops_age_key: ${{ secrets.SOPS_AGE_KEY }}
+
+      - name: Connect Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ steps.bootstrap.outputs.ts_oauth_client_id }}
+          oauth-secret: ${{ steps.bootstrap.outputs.ts_oauth_secret }}
+          tags: tag:ci
+
+      - name: Add GTR host alias
+        run: echo "${{ env.GTR_TAILSCALE_IP }} gtr gtr.tail414c32.ts.net" | sudo tee -a /etc/hosts
+
+      - name: Deploy K3s agents on GTR and tencent
+        working-directory: edge/ansible
+        run: ansible-playbook -i inventory-edge.ini deploy-gtr-k3s-agent.yml -v
+
+      - name: Verify K3s agents
+        working-directory: edge/ansible
+        run: ansible-playbook -i inventory-edge.ini verify-gtr-k3s-agent.yml -v
 
       - if: always()
         name: Cleanup vault artifacts
         run: bash .github/scripts/cleanup-vault.sh
 
   deploy-tunnel:
-    needs: [preflight, deploy-gtr, deploy-edge, deploy-k3s-platform]
+    needs: [preflight, deploy-gtr, deploy-edge, deploy-k3s-agent]
     if: needs.preflight.outputs.run_tunnel == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10

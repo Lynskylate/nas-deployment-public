@@ -4,6 +4,19 @@ envoy_bin_path: "/usr/bin"
 edge_manage_envoy_binary_dir: false
 edge_tunnel_server_enabled: false
 
+# K3s control-plane (server) node
+k3s_server_tailscale_ip: 100.102.140.59
+k3s_server_tls_sans:
+- aliyun
+- 100.102.140.59
+k3s_containerd_http_proxy: ""
+k3s_registry_mirrors:
+  docker.io:
+    - "https://quqdq6jy.mirror.aliyuncs.com"
+k3s_node_labels:
+  gtr.io/region: cn
+  gtr.io/visibility: public
+
 # Aliyun edge node only exposes edge-proxy functions.
 envoy_domain_routes:
   - name: node_exporter_metrics

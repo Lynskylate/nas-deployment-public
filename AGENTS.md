@@ -13,7 +13,6 @@ nas-deployment-public/
 │   ├── patches/           # Deployment-related source patches
 │   ├── pki/               # Root CA (bootstrapped locally, not committed)
 │   └── scripts/           # bootstrap-root-ca.sh, helper scripts
-├── shadowsocks-shadowtls/ # Legacy SS+Shadow-TLS deployment (being superseded by edge/)
 ├── mihomo/                # Mihomo proxy client (Ansible)
 ├── cigbutt/               # Cigbutt quantitative analysis CLI (Python, hatchling)
 ├── victoriatraces/        # VictoriaTraces distributed tracing (Ansible)
@@ -71,16 +70,6 @@ ansible-playbook -i inventory-edge.ini deploy-gtr-tunnel-client.yml
 ansible-playbook -i inventory-edge.ini verify-edge-common.yml
 ```
 
-### Shadowsocks + Shadow-TLS (legacy)
-
-```bash
-cd shadowsocks-shadowtls
-./deploy.sh server   # Deploy to remote proxy
-./deploy.sh client   # Deploy to gtr
-./deploy.sh verify   # Verify
-./deploy.sh all       # Full deployment
-```
-
 ### Mihomo
 
 ```bash
@@ -102,8 +91,7 @@ cd network-monitor
 ### Inventory Structure
 
 - **Edge** uses `inventory-edge.ini` with host groups: `edge_remote_proxy`, `edge_aliyun`, `edge_tencent`, `gtr_core`
-- **Each service** (mihomo, shadowsocks) has its own `inventory.ini`
-- `edge/ansible/ansible.cfg` sets `roles_path` to include both `./roles` and `../../shadowsocks-shadowtls/ansible/roles` (role reuse across deployments)
+- **Each service** (mihomo) has its own `inventory.ini`
 
 ### Variable Layering
 
@@ -194,12 +182,8 @@ Deploy alerts: `cd grafana && ./deploy-alerts.sh` (runs on gtr server).
 
 ## Gotchas and Non-Obvious Patterns
 
-1. **Edge roles_path reuse:** `edge/ansible/ansible.cfg` adds `../../shadowsocks-shadowtls/ansible/roles` to `roles_path`. This means `edge` playbooks can use roles like `node-exporter`, `shadowsocks-server`, etc. from the shadowsocks directory. If you move/rename that directory, edge deployments break.
+1. **Tailscale connectivity:** Edge nodes communicate with GTR's VictoriaMetrics/Logs via Tailscale (`gtr.tail414c32.ts.net`). Ensure Tailscale is running on both sides before deploying vector or verifying scrape targets.
 
-2. **Tailscale connectivity:** Edge nodes communicate with GTR's VictoriaMetrics/Logs via Tailscale (`gtr.tail414c32.ts.net`). Ensure Tailscale is running on both sides before deploying vector or verifying scrape targets.
-
-3. **Inventory IP drift:** The `shadowsocks-shadowtls/ansible/inventory.ini` still references the old IP `142.171.205.19`, while `edge/ansible/inventory-edge.ini` uses `66.154.100.187` for the same `remote_proxy` host. The edge inventory is the current one.
-
-4. **Cigbutt config resolution order:** CLI arg → `CIGBUTT_CONFIG_FILE` env → `~/.config/cigbutt/config.toml` default. DashScope credentials resolve: env vars (`DASHSCOPE_API_KEY`) → config file values.
+2. **Cigbutt config resolution order:** CLI arg → `CIGBUTT_CONFIG_FILE` env → `~/.config/cigbutt/config.toml` default. DashScope credentials resolve: env vars (`DASHSCOPE_API_KEY`) → config file values.
 
 5. **No application code to test locally:** This repo is deployment automation only. There is no build/test cycle for the repo itself (except the cigbutt Python package). The "test" is running the Ansible verify playbooks against live hosts.

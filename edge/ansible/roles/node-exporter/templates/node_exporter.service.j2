@@ -1,0 +1,27 @@
+[Unit]
+Description=Prometheus Node Exporter
+Documentation=https://github.com/prometheus/node_exporter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=node_exporter
+Group=node_exporter
+ExecStart={{ node_exporter_bin_path }}/node_exporter \
+    --web.listen-address=127.0.0.1:{{ node_exporter_port }} \
+    --path.procfs=/proc \
+    --path.sysfs=/sys \
+    --path.rootfs=/ \
+    --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/proc /sys
+
+[Install]
+WantedBy=multi-user.target

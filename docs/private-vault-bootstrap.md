@@ -20,7 +20,6 @@ private repo: `Lynskylate/nas-deployment-vault`
 - `ansible/edge/host_vars/gtr/secret.sops.yml`
 - `ansible/mihomo/group_vars/all/secret.sops.yml`
 - `ansible/mihomo/group_vars/aliyun/secret.sops.yml`
-- `ansible/shadowsocks-shadowtls/group_vars/all/secret.sops.yml`
 - `grafana/secret.sops.yml`
 
 ## Runtime Flow
@@ -33,7 +32,6 @@ private repo: `Lynskylate/nas-deployment-vault`
    - `edge/ansible/host_vars/gtr/secret.runtime.yml`
    - `mihomo/ansible/group_vars/all/secret.runtime.yml`
    - `mihomo/ansible/group_vars/aliyun/secret.runtime.yml`
-   - `shadowsocks-shadowtls/ansible/group_vars/all/secret.runtime.yml`
    - `grafana/secret.runtime.yml`
 5. workflow 运行现有 playbook
 6. job 结束时删除 `.vault/repo`、runtime overlays、临时 SSH key 与 AGE key 文件

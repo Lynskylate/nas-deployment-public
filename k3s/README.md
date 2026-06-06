@@ -29,7 +29,7 @@ ansible-playbook -i inventory-edge.ini verify-gtr-k3s-platform.yml
 `nas-deployment-public/.github/workflows/deploy-infra.yml` now includes a dedicated K3s bootstrap stage.
 
 The workflow no longer reads `K3S_CLUSTER_TOKEN` from GitHub Actions secrets or repo-managed plaintext vars.
-Instead it decrypts `ansible/edge/group_vars/all/secret.sops.yml` from `nas-deployment-vault` at deploy time and renders `edge/ansible/group_vars/all/secret.runtime.yml` before running Ansible. The same bootstrap flow now also renders service-specific overlays for `mihomo/`, `shadowsocks-shadowtls/`, and Grafana alert secrets.
+Instead it decrypts `ansible/edge/group_vars/all/secret.sops.yml` from `nas-deployment-vault` at deploy time and renders `edge/ansible/group_vars/all/secret.runtime.yml` before running Ansible. The same bootstrap flow now also renders service-specific overlays for `mihomo/` and Grafana alert secrets.
 
 Manual trigger target:
 

@@ -40,12 +40,6 @@ jobs:
           ansible-playbook -i inventory.ini verify-exitnode.yml --syntax-check
           ansible-playbook -i inventory-aliyun.ini deploy-aliyun.yml --syntax-check
           ansible-playbook -i inventory-aliyun.ini verify-aliyun.yml --syntax-check
-          cd ../../shadowsocks-shadowtls/ansible
-          ansible-playbook -i inventory.ini server-deploy.yml --syntax-check
-          ansible-playbook -i inventory.ini client-deploy.yml --syntax-check
-          ansible-playbook -i inventory.ini verify.yml --syntax-check
-          ansible-playbook -i inventory.ini vm-update.yml --syntax-check
-          ansible-playbook -i inventory.ini latency-report.yml --syntax-check
           cd ../../network-monitor/ansible
           ansible-playbook -i inventory.ini deploy.yml --syntax-check
 

@@ -1,0 +1,28 @@
+[Unit]
+Description=Shadow-TLS Client
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=shadowtls
+Group=shadowtls
+ExecStart={{ stls_client_bin_path }}/shadow-tls \
+    --v3 \
+    client \
+    --listen 127.0.0.1:{{ shadowtls_client_listen_port }} \
+    --server {{ remote_server_ip }}:{{ shadowtls_tls_port }} \
+    --sni {{ shadowtls_sni_server }} \
+    --password {{ shadowtls_password }}
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

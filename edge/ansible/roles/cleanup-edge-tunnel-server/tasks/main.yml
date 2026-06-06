@@ -1,36 +1,38 @@
 ---
-- name: Gather service facts before tunnel cleanup
-  ansible.builtin.service_facts:
+# Cleanup tunnel server components (one-time operation)
+# Merged: service_facts + systemd stop/mask ×2 + file absent ×5 + hosts cleanup + daemon_reload
 
-- name: Stop, disable and mask tunnel server services
-  ansible.builtin.systemd:
-    name: "{{ item }}"
-    state: stopped
-    enabled: false
-    masked: true
-    daemon_reload: true
-  loop:
-    - shadowsocks-server
-    - shadow-tls-server
-  when: item + ".service" in ansible_facts.services
+- name: Remove tunnel server remnants
+  ansible.builtin.shell: |
+    set -e
 
-- name: Remove tunnel server files and directories
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  loop:
-    - /etc/shadowsocks/config.json
-    - /etc/systemd/system/shadowsocks-server.service
-    - /etc/systemd/system/shadow-tls-server.service
-    - "{{ ss_server_bin_path }}"
-    - "{{ stls_server_bin_path }}"
+    # 1. Stop, disable and mask tunnel services if they exist
+    for svc in shadowsocks-server shadow-tls-server; do
+      if systemctl list-units --full --all 2>/dev/null | grep -qw "^${svc}\.service"; then
+        systemctl stop "${svc}" 2>/dev/null || true
+        systemctl disable "${svc}" 2>/dev/null || true
+        systemctl mask "${svc}" 2>/dev/null || true
+      fi
+    done
 
-- name: Remove pinned Shadow-TLS SNI host from /etc/hosts
-  ansible.builtin.lineinfile:
-    path: /etc/hosts
-    regexp: '^[0-9a-fA-F:\\.]+\\s+{{ shadowtls_sni_server | regex_escape() }}(\\s|$)'
-    state: absent
+    # 2. Remove tunnel server files and directories
+    rm -f /etc/shadowsocks/config.json
+    rm -f /etc/systemd/system/shadowsocks-server.service
+    rm -f /etc/systemd/system/shadow-tls-server.service
+    rm -rf {{ ss_server_bin_path }}
+    rm -rf {{ stls_server_bin_path }}
 
-- name: Reload systemd after tunnel cleanup
-  ansible.builtin.systemd:
-    daemon_reload: true
+    # 3. Remove pinned Shadow-TLS SNI host from /etc/hosts
+    sni_host="{{ shadowtls_sni_server }}"
+    if grep -qF "${sni_host}" /etc/hosts 2>/dev/null; then
+      sed -i "/[[:space:]]${sni_host}\\([[:space:]]\\|\$\\)/d" /etc/hosts
+    fi
+
+    # 4. Reload systemd
+    systemctl daemon-reload
+
+    # 5. Mark cleanup as done
+    mkdir -p /var/lib/gtr-edge
+    date > /var/lib/gtr-edge/edge-tunnel-cleanup.done
+  args:
+    creates: /var/lib/gtr-edge/edge-tunnel-cleanup.done

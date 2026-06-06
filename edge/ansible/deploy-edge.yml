@@ -43,20 +43,14 @@
     - role: edge-envoy
 
   post_tasks:
-    - name: Ensure edge services are running
-      ansible.builtin.systemd:
-        name: "{{ item }}"
-        state: started
-      loop:
-        - node_exporter
-        - tailscaled
-        - envoy
-
-    - name: Ensure vector service is running when enabled
-      ansible.builtin.systemd:
-        name: vector
-        state: started
-      when: edge_vector_enabled | bool
+    - name: Ensure all edge services are running
+      ansible.builtin.shell: |
+        set -e
+        svcs="node_exporter tailscaled envoy{% if edge_vector_enabled | bool %} vector{% endif %}"
+        for svc in $svcs; do
+          systemctl is-active "$svc" >/dev/null 2>&1 || systemctl start "$svc"
+        done
+      changed_when: false
 
     - name: Display edge deployment summary
       ansible.builtin.debug:

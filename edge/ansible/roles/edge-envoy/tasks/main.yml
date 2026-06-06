@@ -1,45 +1,111 @@
 ---
-- name: Create envoy user
-  ansible.builtin.user:
-    name: envoy
-    system: true
-    shell: /usr/sbin/nologin
-    home: /var/lib/envoy
-    create_home: true
+# Optimized: merged user + dirs + log files + logrotate + firewall + systemd
+# Retained template for LDS/CDS (extensive Jinja2 filters/loops)
+# Used copy content: for service unit and bootstrap config
 
-- name: Create managed envoy binary directory
-  ansible.builtin.file:
-    path: "{{ envoy_bin_path }}"
-    state: directory
-    owner: envoy
-    group: envoy
-    mode: "0755"
-  when: edge_manage_envoy_binary_dir | bool
+- name: Setup envoy user, directories and log files
+  ansible.builtin.shell: |
+    set -e
+    id -u envoy &>/dev/null || useradd -r -s /usr/sbin/nologin envoy -d /var/lib/envoy
+    mkdir -p /var/lib/envoy && chown envoy:envoy /var/lib/envoy
+    {% if edge_manage_envoy_binary_dir | bool %}
+    mkdir -p {{ envoy_bin_path }}
+    chown envoy:envoy {{ envoy_bin_path }}
+    {% endif %}
+    mkdir -p /etc/envoy {{ envoy_dynamic_config_dir }} {{ envoy_tls_cert_dir }} {{ envoy_log_path }}
+    chown envoy:envoy /etc/envoy {{ envoy_dynamic_config_dir }} {{ envoy_tls_cert_dir }} {{ envoy_log_path }}
+    touch {{ envoy_log_path }}/access.log {{ envoy_log_path }}/admin_access.log
+    chown envoy:envoy {{ envoy_log_path }}/access.log {{ envoy_log_path }}/admin_access.log
+    chmod 0644 {{ envoy_log_path }}/access.log {{ envoy_log_path }}/admin_access.log
 
-- name: Create envoy directories
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: directory
-    owner: envoy
-    group: envoy
-    mode: "0755"
-  loop:
-    - /etc/envoy
-    - "{{ envoy_dynamic_config_dir }}"
-    - "{{ envoy_tls_cert_dir }}"
-    - "{{ envoy_log_path }}"
-    - /var/lib/envoy
-
-- name: Ensure envoy log files are writable by envoy user
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: touch
-    owner: envoy
-    group: envoy
+- name: Deploy envoy logrotate policy
+  ansible.builtin.copy:
+    dest: /etc/logrotate.d/envoy
+    content: |
+      {{ envoy_log_path }}/*.log {
+          daily
+          rotate {{ envoy_log_rotate }}
+          size {{ envoy_log_max_size }}
+          compress
+          delaycompress
+          missingok
+          notifempty
+          create 0644 envoy envoy
+          sharedscripts
+          postrotate
+              systemctl kill -s USR1 envoy >/dev/null 2>&1 || true
+          endscript
+      }
     mode: "0644"
-  loop:
-    - "{{ envoy_log_path }}/access.log"
-    - "{{ envoy_log_path }}/admin_access.log"
+
+- name: Deploy envoy systemd unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/envoy.service
+    content: |
+      [Unit]
+      Description=Envoy Proxy (Edge)
+      Documentation=https://www.envoyproxy.io/docs/
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=simple
+      User=envoy
+      Group=envoy
+      ExecStart={{ envoy_bin_path }}/envoy -c /etc/envoy/envoy.yaml --log-level info --disable-hot-restart
+      Restart=always
+      RestartSec=5
+      StandardOutput=journal
+      StandardError=journal
+      LimitNOFILE=65536
+      NoNewPrivileges=true
+      PrivateTmp=true
+      ProtectSystem=strict
+      ProtectHome=true
+      ReadWritePaths={{ envoy_log_path }} /var/lib/envoy {{ envoy_dynamic_config_dir }} {{ envoy_tls_cert_dir }}
+      CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+      AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart envoy
+
+- name: Deploy envoy bootstrap config
+  ansible.builtin.copy:
+    dest: /etc/envoy/envoy.yaml
+    content: |
+      ---
+      node:
+        id: {{ inventory_hostname }}-edge
+        cluster: edge-cluster
+
+      admin:
+        access_log_path: {{ envoy_log_path }}/admin_access.log
+        profile_path: {{ envoy_log_path }}/envoy.prof
+        address:
+          socket_address:
+            address: 127.0.0.1
+            port_value: {{ envoy_admin_port }}
+
+      dynamic_resources:
+        lds_config:
+          path_config_source:
+            path: {{ envoy_dynamic_config_dir }}/lds.yaml
+        cds_config:
+          path_config_source:
+            path: {{ envoy_dynamic_config_dir }}/cds.yaml
+
+      overload_manager:
+        resource_monitors:
+          - name: "envoy.resource_monitors.fixed_heap"
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.resource_monitors.fixed_heap.v3.FixedHeapConfig
+              max_heap_size_bytes: 2147483648
+    mode: "0644"
+  notify: restart envoy
 
 - name: Check envoy binary
   ansible.builtin.stat:
@@ -62,7 +128,9 @@
   when:
     - not envoy_binary.stat.exists
     - edge_manage_envoy_binary_dir | bool
+  notify: restart envoy
 
+# ── Terminate route cert validation (local-only, 0 SSH cost) ──
 - name: Extract terminate routes
   ansible.builtin.set_fact:
     edge_terminate_routes: "{{ envoy_domain_routes | selectattr('mode', 'equalto', 'tls_terminate_http') | list }}"
@@ -98,26 +166,7 @@
   loop: "{{ (terminate_cert_files.results | default([])) + (terminate_key_files.results | default([])) }}"
   when: edge_terminate_routes | length > 0
 
-- name: Deploy envoy systemd unit
-  ansible.builtin.template:
-    src: envoy.service.j2
-    dest: /etc/systemd/system/envoy.service
-    owner: root
-    group: root
-    mode: "0644"
-  notify:
-    - reload systemd
-    - restart envoy
-
-- name: Deploy envoy bootstrap config
-  ansible.builtin.template:
-    src: envoy.yaml.j2
-    dest: /etc/envoy/envoy.yaml
-    owner: envoy
-    group: envoy
-    mode: "0644"
-  notify: restart envoy
-
+# ── Dynamic config deployment (keep template for complex Jinja2) ──
 - name: Deploy envoy LDS config
   ansible.builtin.template:
     src: lds.yaml.j2
@@ -136,40 +185,32 @@
     mode: "0644"
   notify: restart envoy
 
-- name: Deploy envoy logrotate policy
-  ansible.builtin.template:
-    src: envoy.logrotate.j2
-    dest: /etc/logrotate.d/envoy
-    owner: root
-    group: root
-    mode: "0644"
-
-- name: Open firewall ports for edge entry (UFW)
-  ansible.builtin.ufw:
-    rule: allow
-    port: "{{ item }}"
-    proto: tcp
-  loop: "{{ [envoy_listener_port] + ([envoy_http_listener_port] if (envoy_http_listener_enabled | bool) else []) }}"
-  when: ansible_facts['pkg_mgr'] == 'apt'
-  ignore_errors: true
-
-- name: Open firewall ports for edge entry (firewalld)
-  ansible.builtin.firewalld:
-    port: "{{ item }}/tcp"
-    permanent: true
-    state: enabled
-  loop: "{{ [envoy_listener_port] + ([envoy_http_listener_port] if (envoy_http_listener_enabled | bool) else []) }}"
-  when: ansible_facts['pkg_mgr'] in ['dnf', 'yum']
-  ignore_errors: true
+- name: Open firewall ports for edge entry
+  ansible.builtin.shell: |
+    set -e
+    {% set _ports = ([envoy_listener_port] + ([envoy_http_listener_port] if (envoy_http_listener_enabled | bool) else [])) | join(' ') %}
+    {% if ansible_facts['pkg_mgr'] == 'apt' %}
+    for port in {{ _ports }}; do
+      ufw allow "$port/tcp" 2>/dev/null || true
+    done
+    {% elif ansible_facts['pkg_mgr'] in ['dnf', 'yum'] %}
+    for port in {{ _ports }}; do
+      firewall-cmd --permanent --add-port="$port/tcp" 2>/dev/null || true
+    done
+    firewall-cmd --reload 2>/dev/null || true
+    {% else %}
+    echo "WARNING: unsupported package manager ({{ ansible_facts['pkg_mgr'] }}), skipping firewall setup"
+    {% endif %}
 
 - name: Flush envoy handlers
   ansible.builtin.meta: flush_handlers
 
 - name: Ensure envoy enabled and running
-  ansible.builtin.systemd:
-    name: envoy
-    enabled: true
-    state: started
+  ansible.builtin.shell: |
+    set -e
+    systemctl daemon-reload
+    systemctl enable --now envoy 2>/dev/null || systemctl start envoy
+  changed_when: false
 
 - name: Wait for envoy admin port
   ansible.builtin.wait_for:

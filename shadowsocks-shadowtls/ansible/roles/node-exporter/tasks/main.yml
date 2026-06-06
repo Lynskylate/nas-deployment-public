@@ -1,39 +1,63 @@
 ---
 # Node Exporter deployment tasks for remote server monitoring
+# Optimized: merged user + dir + service + systemd + wait_for
+# Preserved: unarchive for download with retry support
 
-- name: Create node_exporter user
-  ansible.builtin.user:
-    name: node_exporter
-    system: true
-    shell: /usr/sbin/nologin
-    create_home: false
+- name: Setup node_exporter user and binary directory
+  ansible.builtin.shell: |
+    set -e
+    id -u node_exporter &>/dev/null || useradd -r -s /usr/sbin/nologin node_exporter
+    mkdir -p {{ node_exporter_bin_path }}
+    chown node_exporter:node_exporter {{ node_exporter_bin_path }} 2>/dev/null || true
 
-- name: Create node_exporter binary directory
-  ansible.builtin.file:
-    path: "{{ node_exporter_bin_path }}"
-    state: directory
-    owner: node_exporter
-    group: node_exporter
-    mode: '0755'
+- name: Deploy node_exporter systemd service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/node_exporter.service
+    content: |
+      [Unit]
+      Description=Prometheus Node Exporter
+      Documentation=https://github.com/prometheus/node_exporter
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=simple
+      User=node_exporter
+      Group=node_exporter
+      ExecStart={{ node_exporter_bin_path }}/node_exporter \
+          --web.listen-address=127.0.0.1:{{ node_exporter_port }} \
+          --path.procfs=/proc \
+          --path.sysfs=/sys \
+          --path.rootfs=/ \
+          --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($|/)
+      Restart=always
+      RestartSec=5
+      StandardOutput=journal
+      StandardError=journal
+      NoNewPrivileges=true
+      ProtectSystem=strict
+      ProtectHome=true
+      ReadWritePaths=/proc /sys
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: "0644"
+  notify: restart node_exporter
 
 - name: Check if node_exporter binary exists
   ansible.builtin.stat:
     path: "{{ node_exporter_bin_path }}/node_exporter"
   register: node_exporter_binary
 
-- name: Create temporary directory for download
-  ansible.builtin.tempfile:
-    state: directory
-    suffix: _node_exporter
-  register: temp_dir
-  when: not node_exporter_binary.stat.exists
-
 - name: Download and extract Node Exporter
   ansible.builtin.unarchive:
     src: "{{ node_exporter_download_url }}/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
-    dest: "{{ temp_dir.path }}"
+    dest: "{{ node_exporter_bin_path }}"
     remote_src: true
-    creates: "{{ temp_dir.path }}/node_exporter-{{ node_exporter_version }}.linux-amd64"
+    extra_opts:
+      - "--strip-components=1"
+      - "--wildcards"
+      - "*/node_exporter"
     timeout: 300
   environment: "{{ {'http_proxy': github_download_proxy, 'https_proxy': github_download_proxy} if (github_download_proxy | default('') | length > 0) else {} }}"
   register: node_exporter_download_result
@@ -41,48 +65,28 @@
   delay: 10
   until: node_exporter_download_result is succeeded
   when: not node_exporter_binary.stat.exists
+  notify: restart node_exporter
 
-- name: Install Node Exporter binary
-  ansible.builtin.copy:
-    src: "{{ temp_dir.path }}/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
-    dest: "{{ node_exporter_bin_path }}/node_exporter"
+- name: Ensure node_exporter binary ownership
+  ansible.builtin.file:
+    path: "{{ node_exporter_bin_path }}/node_exporter"
     owner: node_exporter
     group: node_exporter
-    mode: '0755'
-    remote_src: true
-  when: not node_exporter_binary.stat.exists
-  notify:
-    - restart node_exporter
-
-- name: Deploy Node Exporter systemd service file
-  ansible.builtin.template:
-    src: node_exporter.service.j2
-    dest: /etc/systemd/system/node_exporter.service
-    owner: root
-    group: root
-    mode: '0644'
-  notify:
-    - reload systemd
+    mode: "0755"
+  when: node_exporter_binary.stat.exists or (node_exporter_download_result is defined and node_exporter_download_result.changed)
 
 - name: Flush handlers
   ansible.builtin.meta: flush_handlers
 
 - name: Enable and start Node Exporter service
-  ansible.builtin.systemd:
-    name: node_exporter
-    state: started
-    enabled: true
+  ansible.builtin.shell: |
+    set -e
+    systemctl daemon-reload
+    systemctl enable --now node_exporter 2>/dev/null || systemctl start node_exporter
+  changed_when: false
 
 - name: Wait for Node Exporter to be ready
   ansible.builtin.wait_for:
     host: 127.0.0.1
     port: "{{ node_exporter_port }}"
     timeout: 30
-
-- name: Clean up temporary directory
-  ansible.builtin.file:
-    path: "{{ temp_dir.path }}"
-    state: absent
-  when:
-    - not node_exporter_binary.stat.exists
-    - temp_dir.path is defined

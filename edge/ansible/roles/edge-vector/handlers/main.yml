@@ -1,4 +1,6 @@
 ---
+# Handlers fired by copy/template/unarchive change detection.
+# The final enable/start shell task acts as a catch-all after flush_handlers.
 - name: reload systemd
   ansible.builtin.systemd:
     daemon_reload: true

@@ -1,65 +1,39 @@
 ---
-- name: Create vector user
-  ansible.builtin.user:
-    name: vector
-    system: true
-    shell: /usr/sbin/nologin
-    create_home: false
+# Optimized: merged user + dirs + systemd; kept copy/template for files
 
-- name: Create vector directories
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: directory
-    owner: vector
-    group: vector
-    mode: "0755"
-  loop:
-    - "{{ vector_config_dir }}"
-    - "{{ vector_data_dir }}"
-    - "{{ vector_log_path }}"
-
-- name: Check if vector binary exists
-  ansible.builtin.stat:
-    path: "{{ vector_bin_path }}"
-  register: vector_binary
-
-- name: Create temporary directory for vector install
-  ansible.builtin.tempfile:
-    state: directory
-    suffix: _vector
-  register: vector_temp_dir
-  when: not vector_binary.stat.exists
-
-- name: Download and extract vector archive
-  ansible.builtin.unarchive:
-    src: "{{ vector_download_url }}/v{{ vector_version }}/vector-{{ vector_version }}-x86_64-unknown-linux-gnu.tar.gz"
-    dest: "{{ vector_temp_dir.path }}"
-    remote_src: true
-    timeout: 300
-  environment: "{{ {'http_proxy': github_download_proxy, 'https_proxy': github_download_proxy} if (github_download_proxy | default('') | length > 0) else {} }}"
-  register: vector_download_result
-  retries: 5
-  delay: 10
-  until: vector_download_result is succeeded
-  when: not vector_binary.stat.exists
-
-- name: Install vector binary
-  ansible.builtin.copy:
-    src: "{{ vector_temp_dir.path }}/{{ vector_archive_dirname }}/bin/vector"
-    dest: "{{ vector_bin_path }}"
-    owner: root
-    group: root
-    mode: "0755"
-    remote_src: true
-  when: not vector_binary.stat.exists
-  notify: restart vector
+- name: Setup vector user and directories
+  ansible.builtin.shell: |
+    set -e
+    id -u vector &>/dev/null || useradd -r -s /usr/sbin/nologin vector
+    mkdir -p {{ vector_config_dir }} {{ vector_data_dir }} {{ vector_log_path }}
+    chown vector:vector {{ vector_config_dir }} {{ vector_data_dir }} {{ vector_log_path }}
 
 - name: Deploy vector systemd service
-  ansible.builtin.template:
-    src: vector.service.j2
+  ansible.builtin.copy:
     dest: /etc/systemd/system/vector.service
-    owner: root
-    group: root
+    content: |
+      [Unit]
+      Description=Vector observability pipeline
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=simple
+      User=vector
+      Group=vector
+      ExecStart={{ vector_bin_path }} --config {{ vector_config_dir }}/vector.yaml
+      Restart=always
+      RestartSec=5
+      StandardOutput=journal
+      StandardError=journal
+      NoNewPrivileges=true
+      PrivateTmp=true
+      ProtectSystem=strict
+      ProtectHome=true
+      ReadWritePaths={{ vector_data_dir }} {{ vector_log_path }}
+
+      [Install]
+      WantedBy=multi-user.target
     mode: "0644"
   notify:
     - reload systemd
@@ -74,18 +48,34 @@
     mode: "0644"
   notify: restart vector
 
-- name: Flush vector handlers
+- name: Check if vector binary exists
+  ansible.builtin.stat:
+    path: "{{ vector_bin_path }}"
+  register: vector_binary
+
+- name: Download and extract vector binary directly
+  ansible.builtin.unarchive:
+    src: "{{ vector_download_url }}/v{{ vector_version }}/vector-{{ vector_version }}-x86_64-unknown-linux-gnu.tar.gz"
+    dest: "{{ vector_bin_path | dirname }}"
+    remote_src: true
+    extra_opts:
+      - "--strip-components=2"
+      - "vector-x86_64-unknown-linux-gnu/bin/vector"
+    timeout: 300
+  environment: "{{ {'http_proxy': github_download_proxy, 'https_proxy': github_download_proxy} if (github_download_proxy | default('') | length > 0) else {} }}"
+  register: vector_download_result
+  retries: 5
+  delay: 10
+  until: vector_download_result is succeeded
+  when: not vector_binary.stat.exists
+  notify: restart vector
+
+- name: Flush handlers
   ansible.builtin.meta: flush_handlers
 
 - name: Ensure vector service is enabled and running
-  ansible.builtin.systemd:
-    name: vector
-    enabled: true
-    state: started
-    daemon_reload: true
-
-- name: Cleanup vector temp directory
-  ansible.builtin.file:
-    path: "{{ vector_temp_dir.path }}"
-    state: absent
-  when: not vector_binary.stat.exists
+  ansible.builtin.shell: |
+    set -e
+    systemctl daemon-reload
+    systemctl enable --now vector 2>/dev/null || systemctl start vector
+  changed_when: false

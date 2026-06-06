@@ -1,4 +1,6 @@
 ---
+# NOTE: restart is also handled inline in the enable/start shell task.
+# These handlers fire only when service file or binary content changes.
 - name: reload systemd
   ansible.builtin.systemd:
     daemon_reload: true

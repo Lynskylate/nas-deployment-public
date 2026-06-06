@@ -44,7 +44,6 @@ jobs:
       run_edge: ${{ steps.resolve.outputs.run_edge }}
       run_k3s_server: ${{ steps.resolve.outputs.run_k3s_server }}
       run_k3s_agent: ${{ steps.resolve.outputs.run_k3s_agent }}
-      run_tunnel: ${{ steps.resolve.outputs.run_tunnel }}
       run_validate_contract: ${{ steps.resolve.outputs.run_validate_contract }}
       edge_targets: ${{ steps.resolve.outputs.edge_targets }}
     steps:
@@ -112,7 +111,6 @@ jobs:
           run_edge=false
           run_k3s_server=false
           run_k3s_agent=false
-          run_tunnel=false
           run_validate_contract=false
           edge_targets='[]'
 
@@ -122,7 +120,6 @@ jobs:
               run_edge=true
               run_k3s_server=true
               run_k3s_agent=true
-              run_tunnel=true
               run_validate_contract=true
               edge_targets='["remote_proxy","aliyun","tencent"]'
               ;;
@@ -161,7 +158,6 @@ jobs:
             echo "run_edge=$run_edge"
             echo "run_k3s_server=$run_k3s_server"
             echo "run_k3s_agent=$run_k3s_agent"
-            echo "run_tunnel=$run_tunnel"
             echo "run_validate_contract=$run_validate_contract"
             echo "edge_targets=$edge_targets"
           } >> "$GITHUB_OUTPUT"
@@ -199,10 +195,6 @@ jobs:
       - name: Deploy Mihomo + Exitnode
         working-directory: mihomo/ansible
         run: ansible-playbook -i inventory.ini deploy.yml --limit gtr -v
-
-      - name: Deploy Docker cleanup
-        working-directory: mihomo/ansible
-        run: ansible-playbook -i inventory.ini deploy-docker.yml --limit gtr -v
 
       - name: Deploy resource manifest
         working-directory: edge/ansible
@@ -354,56 +346,6 @@ jobs:
       - name: Verify K3s agents
         working-directory: edge/ansible
         run: ansible-playbook -i inventory-edge.ini verify-gtr-k3s-agent.yml -v
-
-      - if: always()
-        name: Cleanup vault artifacts
-        run: bash .github/scripts/cleanup-vault.sh
-
-  deploy-tunnel:
-    needs: [preflight, deploy-gtr, deploy-edge, deploy-k3s-agent]
-    if: needs.preflight.outputs.run_tunnel == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    environment: production
-    steps:
-      - uses: actions/checkout@v6
-
-      - id: bootstrap
-        uses: ./.github/actions/bootstrap-deploy-env
-        with:
-          vault_repo_slug: ${{ vars.VAULT_REPO_SLUG }}
-          vault_repo_ssh_key: ${{ secrets.VAULT_REPO_SSH_KEY }}
-          sops_age_key: ${{ secrets.SOPS_AGE_KEY }}
-
-      - name: Connect Tailscale
-        uses: tailscale/github-action@v3
-        with:
-          oauth-client-id: ${{ steps.bootstrap.outputs.ts_oauth_client_id }}
-          oauth-secret: ${{ steps.bootstrap.outputs.ts_oauth_secret }}
-          tags: tag:ci
-
-      - name: Add GTR host alias
-        run: echo "${{ env.GTR_TAILSCALE_IP }} gtr gtr.tail414c32.ts.net" | sudo tee -a /etc/hosts
-
-      - name: Deploy tunnel server
-        working-directory: edge/ansible
-        run: ansible-playbook -i inventory-edge.ini deploy-edge-tunnel-server.yml -v
-
-      - name: Deploy tunnel client
-        working-directory: edge/ansible
-        run: ansible-playbook -i inventory-edge.ini deploy-gtr-tunnel-client.yml -v
-
-      - name: Verify tunnel connectivity
-        run: |
-          ssh root@gtr.tail414c32.ts.net bash <<'VERIFY'
-            echo "=== Shadow-TLS Client ==="
-            systemctl is-active shadow-tls-client
-            echo "=== Shadowsocks Client ==="
-            systemctl is-active shadowsocks-client
-            echo "=== Proxy Test ==="
-            curl -s --connect-timeout 5 --socks5 127.0.0.1:1080 https://api.ipify.org 2>/dev/null \
-              && echo "" && echo "Proxy OK" || echo "Proxy test failed (may be transient)"
-          VERIFY
 
       - if: always()
         name: Cleanup vault artifacts

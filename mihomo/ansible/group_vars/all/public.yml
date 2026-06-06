@@ -53,16 +53,7 @@ tailscale_exitnode_monitor_interval: 30
 tailscale_exitnode_script_dir: /usr/local/bin
 tailscale_exitnode_textfile_dir: /var/lib/node_exporter/textfile-collector
 
-# --- Docker Cleanup ---
-docker_bridges:
-  - bridge: docker0
-    subnet: 172.17.0.0/16
-  - bridge: br-9257ae6e34da
-    subnet: 172.18.0.0/16
-
-docker_registry_mirrors:
-  - "https://docker.m.daocloud.io"
-  - "https://docker.1panel.live"
-  - "https://hub.rat.dev"
-
-docker_remove_snap: false
+# --- Docker Cleanup (removed 2026-06-07) ---
+# Docker 已从 GTR 卸载，docker_bridges 保留为空列表以防止
+# tailscale-exitnode-monitor.sh.j2 模板渲染时报 undefined variable 错误
+docker_bridges: []

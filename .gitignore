@@ -6,3 +6,8 @@
 *.agekey.pub
 .env.decrypted
 edge/pki/
+
+# Local planning docs and agent scratch files
+docs/plans/
+docs/issues/
+progress.md

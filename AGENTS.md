@@ -64,9 +64,6 @@ ansible-playbook -i inventory-edge.ini deploy-edge.yml
 # Deploy tunnel server (remote_proxy only)
 ansible-playbook -i inventory-edge.ini deploy-edge-tunnel-server.yml
 
-# Deploy tunnel client (gtr only)
-ansible-playbook -i inventory-edge.ini deploy-gtr-tunnel-client.yml
-
 # Verify deployments
 ansible-playbook -i inventory-edge.ini verify-edge-common.yml
 ```
@@ -199,6 +196,8 @@ Deploy alerts: `cd grafana && ./deploy-alerts.sh` (runs on gtr server).
 2. **Tailscale connectivity:** Edge nodes communicate with GTR's VictoriaMetrics/Logs via Tailscale (`gtr.tail414c32.ts.net`). Ensure Tailscale is running on both sides before deploying vector or verifying scrape targets.
 
 3. **Inventory IP drift:** The `shadowsocks-shadowtls/ansible/inventory.ini` still references the old IP `142.171.205.19`, while `edge/ansible/inventory-edge.ini` uses `66.154.100.187` for the same `remote_proxy` host. The edge inventory is the current one.
+
+4. **Tunnel client removed from GTR:** Standalone `shadow-tls-client` + `shadowsocks-client` have been removed from GTR (both playbooks and SSH cleanup). Mihomo's built-in shadow-tls SIP003 plugin now handles all proxy traffic through the edge Envoy infrastructure.
 
 4. **Cigbutt config resolution order:** CLI arg → `CIGBUTT_CONFIG_FILE` env → `~/.config/cigbutt/config.toml` default. DashScope credentials resolve: env vars (`DASHSCOPE_API_KEY`) → config file values.
 

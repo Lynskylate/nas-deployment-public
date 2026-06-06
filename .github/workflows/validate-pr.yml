@@ -32,11 +32,9 @@ jobs:
           ansible-playbook -i inventory-edge.ini verify-gtr-k3s-server.yml --syntax-check
           ansible-playbook -i inventory-edge.ini verify-gtr-k3s-agent.yml --syntax-check
           ansible-playbook -i inventory-edge.ini deploy-gtr-ai-tools.yml --syntax-check
-          ansible-playbook -i inventory-edge.ini deploy-gtr-tunnel-client.yml --syntax-check
           ansible-playbook -i inventory-edge.ini deploy-edge-tunnel-server.yml --syntax-check
           cd ../../mihomo/ansible
           ansible-playbook -i inventory.ini deploy.yml --syntax-check
-          ansible-playbook -i inventory.ini deploy-docker.yml --syntax-check
           ansible-playbook -i inventory.ini deploy-exitnode.yml --syntax-check
           ansible-playbook -i inventory.ini verify.yml --syntax-check
           ansible-playbook -i inventory.ini verify-exitnode.yml --syntax-check

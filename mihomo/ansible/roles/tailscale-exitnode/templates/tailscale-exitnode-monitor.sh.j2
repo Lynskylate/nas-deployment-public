@@ -48,22 +48,7 @@ else
     }
 fi
 
-# --- Check & fix Docker bridge MASQUERADE rules ---
-# With iptables=false, Docker no longer manages these. Required for container NAT.
-{% for bridge in docker_bridges %}
-BRIDGE_{{ loop.index }}_OK=0
-if ${NFT} list chain ip nat POSTROUTING 2>/dev/null | grep -q 'saddr {{ bridge.subnet }}.*masquerade'; then
-    BRIDGE_{{ loop.index }}_OK=1
-else
-    ${NFT} insert rule ip nat POSTROUTING ip saddr {{ bridge.subnet }} oifname != "{{ bridge.bridge }}" masquerade 2>/dev/null && {
-        BRIDGE_{{ loop.index }}_OK=1
-        FIXES=$((FIXES + 1))
-        logger -t exitnode-monitor "FIXED: added Docker bridge MASQUERADE for {{ bridge.subnet }}"
-    } || {
-        logger -t exitnode-monitor "FAIL: could not add Docker bridge MASQUERADE for {{ bridge.subnet }}"
-    }
-fi
-{% endfor %}
+# (Docker bridge MASQUERADE check removed 2026-06-07, Docker no longer on GTR)
 
 # --- Report Prometheus metrics ---
 cat > "${TEMP}" <<EOF
@@ -76,11 +61,6 @@ tailscale_exitnode_nft_masquerade_present{iface="${WAN}"} ${MASQ_OK}
 # HELP tailscale_exitnode_ip_rule_present 1 if Tailscale ip rule exists
 # TYPE tailscale_exitnode_ip_rule_present gauge
 tailscale_exitnode_ip_rule_present{source_cidr="${TAILSCALE_CIDR}",table="${ROUTE_TABLE}"} ${RULE_OK}
-{% for bridge in docker_bridges %}
-# HELP tailscale_exitnode_docker_bridge_masquerade 1 if Docker bridge MASQUERADE exists
-# TYPE tailscale_exitnode_docker_bridge_masquerade gauge
-tailscale_exitnode_docker_bridge_masquerade{bridge="{{ bridge.bridge }}",subnet="{{ bridge.subnet }}"} ${BRIDGE_{{ loop.index }}_OK}
-{% endfor %}
 # HELP tailscale_exitnode_auto_fixes_total Number of auto-fixes applied this run
 # TYPE tailscale_exitnode_auto_fixes_total gauge
 tailscale_exitnode_auto_fixes_total ${FIXES}

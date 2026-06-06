@@ -1,4 +1,4 @@
-{% if k3s_registry_mirrors is defined and k3s_registry_mirrors %}
+{% if k3s_registry_mirrors is defined and k3s_registry_mirrors | length > 0 %}
 mirrors:
 {% for registry, endpoints in k3s_registry_mirrors.items() %}
   {{ registry }}:

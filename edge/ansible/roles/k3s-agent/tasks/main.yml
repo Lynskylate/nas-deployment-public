@@ -42,7 +42,7 @@
     owner: root
     group: root
     mode: "0644"
-  when: k3s_registry_mirrors is defined and k3s_registry_mirrors
+  when: k3s_registry_mirrors is defined and (k3s_registry_mirrors | length > 0)
   notify: restart k3s agent
 
 - name: Set K3s installer script URL

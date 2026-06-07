@@ -1,0 +1,185 @@
+# Mihomo Metrics Collector Deployment
+# Long-running pod collecting Mihomo API metrics every 30s → VictoriaMetrics
+# Pinned to GTR (Mihomo API access via Tailscale IP)
+#
+# NOTE: MIHOMO_SECRET must be provided via K8s Secret `mihomo-api` in namespace `monitoring`
+# Create it with:
+#   kubectl -n monitoring create secret generic mihomo-api \
+#       --from-literal=MIHOMO_SECRET='<secret>' --dry-run=client -o yaml | kubectl apply -f -
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mihomo-metrics-script
+  namespace: monitoring
+data:
+  mihomo-metrics.sh: |
+    #!/bin/bash
+    # Mihomo Metrics Collector - K8s containerized version
+    set -euo pipefail
+
+    # Dependencies (curl, jq, bash) installed by Deployment command before exec
+    # Configuration (env vars override defaults)
+    MIHOMO_API="${MIHOMO_API:-http://100.121.0.67:9090}"
+    VICTORIAMETRICS_URL="${VICTORIAMETRICS_URL:-http://100.121.0.67:8428}"
+    METRIC_PREFIX="${METRIC_PREFIX:-mihomo}"
+    SERVER_LABEL="${SERVER_LABEL:-gtr}"
+    INTERVAL="${INTERVAL:-30}"
+
+    : "${MIHOMO_SECRET:?MIHOMO_SECRET is required}"
+
+    mihomo_api() {
+        curl -s --max-time 3 "${MIHOMO_API}${1}" \
+            -H "Authorization: Bearer ${MIHOMO_SECRET}" 2>/dev/null || echo "{}"
+    }
+
+    mihomo_api_sse() {
+        curl -s --max-time 3 "${MIHOMO_API}${1}" \
+            -H "Authorization: Bearer ${MIHOMO_SECRET}" 2>/dev/null | \
+            grep -E '^\{.*\}$' | tail -1 || echo '{"up":0,"down":0,"upTotal":0,"downTotal":0}'
+    }
+
+    push_metrics() {
+        local ts
+        ts=$(date +%s)000
+        local tmpfile
+        tmpfile=$(mktemp)
+        trap "rm -f $tmpfile" RETURN
+
+        write_meta() { echo "# HELP ${METRIC_PREFIX}_${1} ${2}" >> "$tmpfile"; echo "# TYPE ${METRIC_PREFIX}_${1} ${3}" >> "$tmpfile"; }
+        write_val()  { echo "${METRIC_PREFIX}_${1}{${3}} ${2} ${ts}" >> "$tmpfile"; }
+
+        # 1. Traffic metrics from SSE
+        local traffic
+        traffic=$(mihomo_api_sse "/traffic")
+        write_meta "traffic_upload_bytes" "Current upload speed in bytes/s" "gauge"
+        write_meta "traffic_download_bytes" "Current download speed in bytes/s" "gauge"
+        write_meta "traffic_upload_total_bytes" "Total upload bytes" "counter"
+        write_meta "traffic_download_total_bytes" "Total download bytes" "counter"
+        write_val "traffic_upload_bytes" "$(echo "$traffic" | jq -r '.up // 0')" "server=\"${SERVER_LABEL}\""
+        write_val "traffic_download_bytes" "$(echo "$traffic" | jq -r '.down // 0')" "server=\"${SERVER_LABEL}\""
+        write_val "traffic_upload_total_bytes" "$(echo "$traffic" | jq -r '.upTotal // 0')" "server=\"${SERVER_LABEL}\""
+        write_val "traffic_download_total_bytes" "$(echo "$traffic" | jq -r '.downTotal // 0')" "server=\"${SERVER_LABEL}\""
+
+        # 2. Connection metrics
+        local conns
+        conns=$(mihomo_api "/connections")
+        write_meta "connections_active" "Number of active connections" "gauge"
+        write_meta "memory_bytes" "Memory usage in bytes" "gauge"
+        write_val "connections_active" "$(echo "$conns" | jq -r '.connections | length // 0')" "server=\"${SERVER_LABEL}\""
+        write_val "memory_bytes" "$(echo "$conns" | jq -r '.memory // 0')" "server=\"${SERVER_LABEL}\""
+
+        # 3. Proxy status
+        local proxies
+        proxies=$(mihomo_api "/proxies")
+        write_meta "proxy_up" "Proxy availability status (1=up, 0=down)" "gauge"
+        write_meta "proxy_selected" "Whether proxy is currently selected (1=yes, 0=no)" "gauge"
+        write_meta "proxy_group_size" "Number of proxies in group" "gauge"
+        sanitize_label() {
+            echo "$1" | tr -d '",}\n\r' | sed 's/[^a-zA-Z0-9_-]/_/g'
+        }
+
+        echo "$proxies" | jq -r '.proxies // {} | keys[]' 2>/dev/null | while read -r group; do
+            [ -z "$group" ] && continue
+            local alive now gsize
+            alive=$(echo "$proxies" | jq -r --arg g "$group" '.proxies[$g].alive // false')
+            now=$(echo "$proxies" | jq -r --arg g "$group" '.proxies[$g].now // ""')
+            gsize=$(echo "$proxies" | jq -r --arg g "$group" '.proxies[$g].all | length // 0')
+            if [ "$alive" = "true" ]; then
+                write_val "proxy_up" "1" "proxy_group=\"$(sanitize_label "$group")\",type=\"group\",server=\"${SERVER_LABEL}\""
+            else
+                write_val "proxy_up" "0" "proxy_group=\"$(sanitize_label "$group")\",type=\"group\",server=\"${SERVER_LABEL}\""
+            fi
+            write_val "proxy_group_size" "$gsize" "proxy_group=\"$(sanitize_label "$group")\",server=\"${SERVER_LABEL}\""
+            if [ -n "$now" ] && [ "$now" != "null" ] && [ "$now" != "" ]; then
+                write_val "proxy_selected" "1" "proxy_group=\"$(sanitize_label "$group")\",proxy=\"$(sanitize_label "$now")\",server=\"${SERVER_LABEL}\""
+            fi
+        done
+
+        # 4. Scrape success marker
+        write_meta "scrape_success" "Whether the metrics scrape was successful" "gauge"
+        write_val "scrape_success" "1" "server=\"${SERVER_LABEL}\""
+
+        # Push to VictoriaMetrics
+        local http_code
+        http_code=$(curl -s -w "%{http_code}" -o /dev/null --max-time 5 -X POST \
+            "${VICTORIAMETRICS_URL}/api/v1/import/prometheus" \
+            -H "Content-Type: text/plain" \
+            --data-binary "@$tmpfile" 2>/dev/null)
+
+        if [ "$http_code" = "204" ] || [ "$http_code" = "200" ]; then
+            echo "$(date -Iseconds) Metrics pushed (HTTP $http_code)"
+        else
+            echo "$(date -Iseconds) Push failed (HTTP $http_code)" >&2
+            # Log failure metric
+            echo "${METRIC_PREFIX}_scrape_success{server=\"${SERVER_LABEL}\"} 0 $(date +%s)000" | \
+                curl -s --max-time 5 -X POST "${VICTORIAMETRICS_URL}/api/v1/import/prometheus" \
+                -H "Content-Type: text/plain" --data-binary @- 2>/dev/null
+        fi
+    }
+
+    echo "Mihomo metrics collector starting (interval=${INTERVAL}s)"
+    while true; do
+        push_metrics || true
+        sleep "$INTERVAL"
+    done
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mihomo-metrics
+  namespace: monitoring
+  labels:
+    app: mihomo-metrics
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mihomo-metrics
+  template:
+    metadata:
+      labels:
+        app: mihomo-metrics
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: gtr
+      containers:
+        - name: collector
+          image: alpine:3.19
+          command: ["/bin/sh", "-c"]
+          args:
+            - "apk add --no-cache curl jq bash >&2 && exec /scripts/mihomo-metrics.sh"
+          env:
+            - name: MIHOMO_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mihomo-api
+                  key: MIHOMO_SECRET
+            - name: MIHOMO_API
+              value: "http://100.121.0.67:9090"
+            - name: VICTORIAMETRICS_URL
+              value: "http://100.121.0.67:8428"  # Bare-metal VM on GTR — update to K8s Service DNS when VM migrates in stage 2
+            - name: INTERVAL
+              value: "30"
+          # Root required for apk add at startup. Dropping capabilities provides
+          # partial hardening. Consider pre-building a custom image in a future phase.
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+              readOnly: true
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        - name: script
+          configMap:
+            name: mihomo-metrics-script
+            defaultMode: 0555

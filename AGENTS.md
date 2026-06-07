@@ -6,13 +6,20 @@
 
 ## 核心规矩
 
-1. **无明文凭据** — 所有敏感值在私有 `nas-deployment-vault` 仓库中（SOPS + AGE 加密），`.runtime.yml` 由 CI 解密生成且 gitignored。详见 [`docs/deployment/secrets-management.md`](docs/deployment/secrets-management.md)。
+1. **无明文凭据** — 敏感值分两层管理：
+   - **节点层**（Ansible host_vars/group_vars）→ SOPS + AGE 加密，存入私有 `nas-deployment-vault`，`.runtime.yml` gitignored
+   - **K8s 层**（集群内 Secret）→ `kubeseal` 加密为 SealedSecret CRD，直接提交到本仓库 `platform/resources/`，由 ArgoCD 同步
+   
+   详细加密操作见 [`docs/deployment/secrets-encryption-guide.md`](docs/deployment/secrets-encryption-guide.md)。
+   Vault 仓库结构见 [`docs/deployment/secrets-management.md`](docs/deployment/secrets-management.md)。
 
 2. **Ansible 约定** — 详见 [`docs/topic/infrastructure/ansible-conventions.md`](docs/topic/infrastructure/ansible-conventions.md)。关键：assert > fail，notify + flush_handlers，CI 中 shell task 用 pipefail 必须加 `args: executable: /bin/bash`
 
-3. **K3s 平台 CI 部署** — ArgoCD + SealedSecrets + Tailscale Operator 通过 GitHub Actions 自动部署。详见 [`docs/deployment/k3s-platform-ci-deployment-guide.md`](docs/deployment/k3s-platform-ci-deployment-guide.md)
+3. **K3s 应用由 ArgoCD 管理** — 所有 K3s 集群内应用（监控、日志、代理、面板等）必须通过 ArgoCD GitOps 部署，禁止手动 `kubectl apply` 或 Ansible 直接部署 K8s 资源。ArgoCD 自身可由 Ansible 引导安装（唯一例外）。Ansible 仅用于基础设施层（Tailscale、K3s、内核模块、Mihomo 等）。详见 [`docs/planning/migrate-services-ansible-to-k3s.md`](docs/planning/migrate-services-ansible-to-k3s.md)。
 
-4. **Pre-commit** — 提交前自动运行 `actionlint`（workflow lint）、`check-yaml`、明文凭据守卫等。安装：`bash scripts/setup-git-hooks.sh`。若有 `pre-commit` 则体验更完整：`pip install pre-commit && pre-commit install`
+4. **K3s 平台 CI 部署** — ArgoCD + SealedSecrets + Tailscale Operator 通过 GitHub Actions 自动部署。详见 [`docs/deployment/k3s-platform-ci-deployment-guide.md`](docs/deployment/k3s-platform-ci-deployment-guide.md)
+
+5. **Pre-commit** — 提交前自动运行 `actionlint`（workflow lint）、`check-yaml`、明文凭据守卫等。安装：`bash scripts/setup-git-hooks.sh`。若有 `pre-commit` 则体验更完整：`pip install pre-commit && pre-commit install`
 
 ## 仓库结构
 
@@ -109,7 +116,7 @@ gh workflow run deploy-infra.yml --ref main -f target=all
 
 ## Gotchas
 
-1. **`remote_proxy` 不是 K3s 节点:** 不要将其加入 K3s agent 组。
+1. **`remote_proxy` 已加入 K3s agent（2026-06）：** 打 `NoSchedule` taint，仅运行 DaemonSet（node_exporter、Vector）。跨洋 ~200ms 延迟，不调度业务 Pod。详见 [`docs/planning/migrate-services-ansible-to-k3s.md`](docs/planning/migrate-services-ansible-to-k3s.md)。
 
 2. **Tunnel client 已从 GTR 移除:** Mihomo 内置 shadow-tls SIP003 处理所有代理流量。
 
@@ -126,7 +133,8 @@ gh workflow run deploy-infra.yml --ref main -f target=all
 | 主题 | 文档 |
 |------|------|
 | Ansible 约定 | [`docs/topic/infrastructure/ansible-conventions.md`](docs/topic/infrastructure/ansible-conventions.md) |
-| Secrets 管理 | [`docs/deployment/secrets-management.md`](docs/deployment/secrets-management.md) |
+| Secrets 加密操作 | [`docs/deployment/secrets-encryption-guide.md`](docs/deployment/secrets-encryption-guide.md) |
+| Secrets 架构与 Vault | [`docs/deployment/secrets-management.md`](docs/deployment/secrets-management.md) |
 | K3s 平台 CI 部署 | [`docs/deployment/k3s-platform-ci-deployment-guide.md`](docs/deployment/k3s-platform-ci-deployment-guide.md) |
 | K3s 平台概述 | [`k3s/README.md`](k3s/README.md) |
 | Vault 仓库 | `nas-deployment-vault/README.md`（私有仓库） |

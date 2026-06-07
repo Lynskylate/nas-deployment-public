@@ -1,0 +1,115 @@
+# Network Monitor CronJob — tests site connectivity through Mihomo proxy
+# Schedule: every 5 minutes, pinned to GTR (Mihomo proxy access via Tailscale IP)
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: network-monitor-script
+  namespace: monitoring
+data:
+  network-monitor.sh: |
+    #!/bin/sh
+    # Network Connectivity Monitoring via Mihomo Proxy (POSIX sh)
+
+    TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    PROXY="100.121.0.67:7890"
+    TIMEOUT=10
+
+    test_site() {
+        site_name="$1"
+        url="$2"
+        expected_route="$3"
+        category="${4:-general}"
+
+        response=$(curl -o /dev/null -s -w "%{http_code} %{time_total}" \
+            --max-time "$TIMEOUT" -x "$PROXY" "$url" 2>&1)
+        exit_code=$?
+
+        if [ $exit_code -eq 0 ]; then
+            status_code=$(echo "$response" | cut -d' ' -f1)
+            response_time=$(echo "$response" | cut -d' ' -f2)
+            case "$response_time" in
+                *[!0-9.]*) response_time=0 ;;
+            esac
+        else
+            status_code="000"
+            response_time=0
+        fi
+
+        echo "{\"timestamp\":\"${TIMESTAMP}\",\"site\":\"${site_name}\",\"url\":\"${url}\",\"status_code\":${status_code},\"response_time\":${response_time},\"proxy\":\"mihomo\",\"expected_route\":\"${expected_route}\",\"category\":\"${category}\"}"
+    }
+
+    # Domestic Sites (direct routing expected)
+    test_site "xiaomi-204"      "http://connect.rom.miui.com/generate_204" "direct" "cdn"
+    test_site "miui-cdn"        "http://www.miui.com"                      "direct" "cdn"
+    test_site "baidu"           "http://www.baidu.com"                     "direct" "search"
+    test_site "bing-cn"         "http://cn.bing.com"                       "direct" "search"
+    test_site "taobao"          "https://www.taobao.com"                   "direct" "ecommerce"
+    test_site "jd"              "https://www.jd.com"                       "direct" "ecommerce"
+    test_site "alipay"          "https://www.alipay.com"                   "direct" "payment"
+    test_site "bilibili"        "https://www.bilibili.com"                 "direct" "video"
+    test_site "qq"              "https://im.qq.com"                        "direct" "social"
+
+    # International Sites (proxy routing expected)
+    test_site "google-204"      "http://www.google.com/generate_204"       "proxy" "cdn"
+    test_site "google-search"   "https://www.google.com"                  "proxy" "search"
+    test_site "gstatic"         "http://www.gstatic.com/generate_204"      "proxy" "cdn"
+    test_site "youtube-204"     "https://www.youtube.com/generate_204"     "proxy" "streaming"
+    test_site "netflix"         "https://www.netflix.com"                 "proxy" "streaming"
+    test_site "github-api"      "https://api.github.com"                  "proxy" "api"
+    test_site "github-raw"      "https://raw.githubusercontent.com"        "proxy" "cdn"
+    test_site "github-assets"   "https://githubassets.com"                "proxy" "cdn"
+    test_site "github-avatars"  "https://avatars.githubusercontent.com"    "proxy" "cdn"
+    test_site "stackoverflow"   "https://stackoverflow.com"               "proxy" "dev"
+    test_site "cloudflare"      "http://www.cloudflare.com/cdn-cgi/trace" "proxy" "cdn"
+    test_site "cloudflare-cdn"  "https://cp.cloudflare.com"               "proxy" "cdn"
+    test_site "openai"          "https://api.openai.com"                  "proxy" "ai"
+    test_site "chatgpt"         "https://chatgpt.com"                     "proxy" "ai"
+    test_site "twitter"         "https://x.com"                           "proxy" "social"
+    test_site "telegram-web"    "https://web.telegram.org"                "proxy" "social"
+    test_site "reddit"          "https://www.reddit.com"                  "proxy" "social"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: network-monitor
+  namespace: monitoring
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          nodeSelector:
+            kubernetes.io/hostname: gtr
+          restartPolicy: Never
+          containers:
+            - name: monitor
+              image: curlimages/curl:8.13.0
+              command: ["/bin/sh"]
+              args: ["/scripts/network-monitor.sh"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+                readOnlyRootFilesystem: true
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 16Mi
+                limits:
+                  cpu: 100m
+                  memory: 64Mi
+          volumes:
+            - name: script
+              configMap:
+                name: network-monitor-script
+                defaultMode: 0555

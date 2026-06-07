@@ -88,7 +88,7 @@
   failed_when: argocd_admin_password.stdout | length == 0
 
 - name: Create repo credential secret from template
-  when: argocd_repo_ssh_key is defined and argocd_repo_ssh_key | length > 0
+  when: (argocd_repo_ssh_key is defined and argocd_repo_ssh_key | length > 0) or (github_token is defined and github_token | length > 0)
   block:
     - name: Render repo credential secret
       ansible.builtin.template:

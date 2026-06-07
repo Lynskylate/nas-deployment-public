@@ -73,7 +73,7 @@
     extra_opts:
       - "--strip-components=2"
       - "vector-x86_64-unknown-linux-gnu/bin/vector"
-  when: vector_download_result is succeeded
+  when: vector_download_result is changed
   notify: restart vector
 
 - name: Flush handlers

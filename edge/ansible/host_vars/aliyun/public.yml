@@ -1,5 +1,4 @@
 ---
-cleanup_legacy_proxy: true
 envoy_bin_path: "/usr/bin"
 edge_manage_envoy_binary_dir: false
 edge_tunnel_server_enabled: false

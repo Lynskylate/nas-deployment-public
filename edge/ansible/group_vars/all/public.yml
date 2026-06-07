@@ -6,18 +6,12 @@ shadowtls_download_url: https://github.com/ihciah/shadow-tls/releases/download
 shadowsocks_method: aes-256-gcm
 shadowsocks_timeout: 300
 shadowsocks_server_port: 8388
-shadowsocks_client_port: 1080
-shadowsocks_client_local_address: 127.0.0.1
 shadowtls_tls_port: 443
 shadowtls_sni_server: www.microsoft.com
 shadowtls_sni_port: 443
 shadowtls_server_listen_port: 8443
-shadowtls_client_listen_port: 8443
-remote_server_ip: 66.154.100.187
 ss_server_bin_path: /usr/local/shadowsocks-server
 stls_server_bin_path: /usr/local/shadow-tls-server
-ss_client_bin_path: /usr/local/shadowsocks-client
-stls_client_bin_path: /usr/local/shadow-tls-client
 edge_tunnel_server_enabled: false
 node_exporter_version: 1.8.2
 node_exporter_download_url: https://github.com/prometheus/node_exporter/releases/download
@@ -63,22 +57,6 @@ victoriatraces_host: gtr.tail414c32.ts.net
 victoriatraces_http_port: 9428
 edge_vector_otlp_grpc_listen: 127.0.0.1:4317
 edge_vector_otlp_http_listen: 127.0.0.1:4318
-cleanup_legacy_proxy: false
-legacy_proxy_cleanup_marker: /var/lib/gtr-edge/aliyun-legacy-proxy-cleanup.done
-legacy_proxy_services:
-- mihomo
-- shadowsocks-client
-- shadow-tls-client
-legacy_proxy_paths:
-- /etc/mihomo
-- /usr/local/bin/mihomo
-- /etc/systemd/system/mihomo.service
-- /etc/envoy/htpasswd
-edge_ca_issue_enabled: false
-edge_ca_trust_enabled: false
-edge_ca_local_issued_dir: /tmp/gtr-edge-ca/issued
-edge_ca_trust_target_path: /usr/local/share/ca-certificates/gtr-edge-root-ca.crt
-envoy_tls_certificates: []
 edge_forbidden_proxy_ports:
 - 1080
 - 7890

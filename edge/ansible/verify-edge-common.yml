@@ -24,7 +24,7 @@
           ss -tulnp | grep -q ":$port " || { echo "FAIL: port $port not listening"; exit 1; }
         done
         # Assert forbidden proxy ports are NOT listening
-        for fport in 1080 7890 8888; do
+        for fport in {{ edge_forbidden_proxy_ports | join(' ') }}; do
           if ss -tulnp | grep -qE ":$fport\b"; then
             echo "FAIL: forbidden proxy port $fport detected"
             exit 1

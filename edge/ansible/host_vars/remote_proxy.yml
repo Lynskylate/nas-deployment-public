@@ -4,7 +4,6 @@
 github_download_proxy: ""
 k3s_mirror: ""
 
-cleanup_legacy_proxy: false
 edge_tunnel_server_enabled: true
 
 envoy_domain_routes:

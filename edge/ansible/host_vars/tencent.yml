@@ -1,5 +1,4 @@
 ---
-cleanup_legacy_proxy: false
 edge_tunnel_server_enabled: false
 
 # Tencent edge node ships edge logs to GTR VictoriaLogs through Tailscale.

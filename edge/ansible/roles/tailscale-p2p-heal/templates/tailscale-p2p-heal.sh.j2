@@ -1,0 +1,54 @@
+#!/bin/bash
+set -euo pipefail
+
+peer_name={{ tailscale_p2p_peer_name | quote }}
+peer_ip={{ tailscale_p2p_peer_ip | quote }}
+attempts={{ tailscale_p2p_heal_attempts | int }}
+delay_seconds={{ tailscale_p2p_heal_retry_delay_seconds | int }}
+ping_count={{ tailscale_p2p_heal_ping_count | int }}
+
+log() {
+  printf '[tailscale-p2p-heal] %s\n' "$*"
+}
+
+flatten_output() {
+  tr '\n' ' ' <<<"$1" | sed 's/[[:space:]]\+/ /g; s/^ //; s/ $//'
+}
+
+run_ping() {
+  tailscale ping -c "$ping_count" "$peer_ip" 2>&1
+}
+
+is_direct() {
+  local output=$1
+  grep -q 'pong from' <<<"$output" && ! grep -q 'via DERP(' <<<"$output"
+}
+
+refresh_path() {
+  tailscale debug rebind >/dev/null 2>&1 || true
+  tailscale debug restun >/dev/null 2>&1 || true
+  tailscale debug break-derp-conns >/dev/null 2>&1 || true
+  tailscale debug force-netmap-update >/dev/null 2>&1 || true
+}
+
+output=$(run_ping || true)
+if is_direct "$output"; then
+  log "direct path healthy for ${peer_name}: $(flatten_output "$output")"
+  exit 0
+fi
+
+log "direct path degraded for ${peer_name}: $(flatten_output "$output")"
+
+for attempt in $(seq 1 "$attempts"); do
+  refresh_path
+  sleep "$delay_seconds"
+  output=$(run_ping || true)
+  if is_direct "$output"; then
+    log "direct path restored for ${peer_name} on attempt ${attempt}: $(flatten_output "$output")"
+    exit 0
+  fi
+  log "attempt ${attempt} still not direct for ${peer_name}: $(flatten_output "$output")"
+done
+
+log "failed to restore direct path for ${peer_name} after ${attempts} attempts"
+exit 1

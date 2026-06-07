@@ -1,0 +1,7 @@
+---
+- name: reload tailscale p2p heal systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+    name: "{{ tailscale_p2p_heal_timer_name }}"
+    enabled: true
+    state: restarted

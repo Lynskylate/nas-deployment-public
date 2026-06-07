@@ -3,6 +3,9 @@ ansible_ssh_common_args: '-o ServerAliveInterval=15 -o ServerAliveCountMax=4 -o 
 envoy_bin_path: "/usr/bin"
 edge_manage_envoy_binary_dir: false
 edge_tunnel_server_enabled: false
+tailscale_p2p_heal_enabled: true
+tailscale_p2p_peer_name: gtr
+tailscale_p2p_peer_ip: 100.121.0.67
 
 # K3s control-plane (server) node
 k3s_server_tailscale_ip: 100.100.99.70

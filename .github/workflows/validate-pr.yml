@@ -22,10 +22,17 @@ jobs:
       - name: Plaintext secret guard
         run: python3 scripts/check-no-plaintext-secrets.py
 
+      - name: Validate CI topology contract
+        run: python3 scripts/validate_ci_topology.py
+
+      - name: Docker build mihomo-metrics image
+        run: docker build -t local/mihomo-metrics:pr platform/images/mihomo-metrics
+
       - name: Ansible syntax check
         run: |
           cd edge/ansible
           ansible-playbook -i inventory-edge.ini deploy-edge.yml --syntax-check
+          ansible-playbook -i inventory-edge.ini verify-edge-common.yml --syntax-check
           ansible-playbook -i inventory-edge.ini deploy-resource-manifest.yml --syntax-check
           ansible-playbook -i inventory-edge.ini deploy-gtr-k3s-server.yml --syntax-check
           ansible-playbook -i inventory-edge.ini deploy-gtr-k3s-agent.yml --syntax-check

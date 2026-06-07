@@ -9,13 +9,58 @@
       register: k3s_server_state
       changed_when: false
 
+    - name: Read aliyun tailscale IPv4 address
+      ansible.builtin.command: tailscale ip -4
+      register: k3s_server_tailscale_ip_actual
+      changed_when: false
+
+    - name: Read current Tailscale netfilter mode
+      ansible.builtin.shell: |
+        set -o pipefail
+        tailscale debug prefs 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('NetfilterMode', 0))"
+      args:
+        executable: /bin/bash
+      register: k3s_server_tailscale_netfilter
+      changed_when: false
+      failed_when: false
+
     - name: Check K3s node summary
       ansible.builtin.command: k3s kubectl get nodes -o wide
       register: k3s_nodes
       changed_when: false
 
+    - name: Probe direct Tailscale path from aliyun to peer
+      ansible.builtin.command: "tailscale ping -c 5 {{ tailscale_p2p_peer_ip }}"
+      register: tailscale_p2p_probe
+      changed_when: false
+      failed_when: false
+      retries: 3
+      delay: 5
+      until:
+        - tailscale_p2p_probe.rc == 0
+        - "'via DERP(' not in tailscale_p2p_probe.stdout"
+      when: tailscale_p2p_heal_enabled | default(false) | bool
+
+    - name: Assert aliyun control-plane Tailscale settings
+      ansible.builtin.assert:
+        that:
+          - k3s_server_state.stdout == "active"
+          - k3s_server_tailscale_ip_actual.stdout_lines[0] == k3s_server_tailscale_ip
+          - (not (k3s_prereq_tailscale_nodivert | default(false) | bool)) or (k3s_server_tailscale_netfilter.stdout | trim | int == 1)
+          - (not (tailscale_p2p_heal_enabled | default(false) | bool)) or (tailscale_p2p_probe.rc == 0)
+          - (not (tailscale_p2p_heal_enabled | default(false) | bool)) or ("via DERP(" not in tailscale_p2p_probe.stdout)
+        fail_msg: >-
+          aliyun 控制面 Tailscale 契约不满足：
+          tailscale_ip={{ k3s_server_tailscale_ip_actual.stdout_lines[0] | default('missing') }}
+          expected={{ k3s_server_tailscale_ip | default('missing') }}
+          netfilter={{ k3s_server_tailscale_netfilter.stdout | trim | default('missing') }}
+          direct_probe={{ tailscale_p2p_probe.stdout | default('not-run') | trim }}
+
     - name: Show K3s server summary
       ansible.builtin.debug:
         msg:
           - "k3s service: {{ k3s_server_state.stdout }}"
+          - "tailscale_ip={{ k3s_server_tailscale_ip_actual.stdout_lines[0] | default('missing') }}"
+          - "tailscale_netfilter_mode={{ k3s_server_tailscale_netfilter.stdout | trim | default('missing') }}"
+          - "tailscale_direct_probe={{ tailscale_p2p_probe.stdout | default('not-run') | trim }}"
           - "{{ k3s_nodes.stdout }}"

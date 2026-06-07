@@ -39,6 +39,27 @@ deploy-gtr
 
 ## CI 与手动部署的关键区别
 
+### 0. CI 稳定性契约
+
+当前仓库**刻意不把 aliyun 的 Tailscale 直连当作 CI 前提**。稳定路径是：
+
+| 路径 | 固定策略 | 原因 |
+|------|---------|------|
+| GitHub Actions → aliyun SSH | `inventory-edge.ini` 中 `aliyun ansible_host=<公网 IP>` | aliyun↔gtr 的 Tailscale 直连会受云厂商/运营商 UDP 路径影响，不能作为 CI 依赖 |
+| K3s 默认 API | `group_vars/all/public.yml` 中 `k3s_server_url=https://<aliyun Tailscale IP>:6443` | gtr、本地控制面默认仍优先走 Tailscale |
+| tencent → K3s API | `host_vars/tencent.yml` 中 `k3s_agent_server_url=https://<aliyun 公网 IP>:6443` | tencent→aliyun 的 Tailscale TCP 路径不可靠，需显式走公网 |
+| aliyun Tailscale | `k3s_prereq_tailscale_nodivert: true` | 防止云厂商 100.x 地址与 Tailscale netfilter 冲突导致失联 |
+
+以上契约已写入：
+
+- `scripts/validate_ci_topology.py`
+- `validate-pr.yml`
+- `deploy-infra.yml` 的 `preflight`
+- `verify-gtr-k3s-server.yml`
+- `verify-gtr-k3s-agent.yml`
+
+如果未来要改回“CI 全量依赖 Tailscale 直连”，必须先证明 aliyun/tencent 的真实网络路径稳定，再同步更新这些校验。
+
 ### 1. 手动步骤 CI 需自动化
 
 | 手动步骤 | CI 处理方式 | 优先级 |

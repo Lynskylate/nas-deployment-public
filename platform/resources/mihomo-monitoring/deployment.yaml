@@ -1,6 +1,6 @@
 # Mihomo Metrics Collector Deployment + ConfigMap
 # Long-running pod collecting Mihomo API metrics every 30s → VictoriaMetrics
-# Pinned to GTR. Dependencies installed at container startup (apk add in args).
+# Pinned to GTR. Image pre-built via GitHub Actions (ghcr.io/lynskylate/mihomo-metrics).
 #
 # NOTE: MIHOMO_SECRET must be provided via SealedSecret `mihomo-api` in namespace `monitoring`.
 # See docs/planning/stage-0-1-node-commands.md for SealedSecret creation instructions.
@@ -14,7 +14,7 @@ data:
   mihomo-metrics.sh: |
     #!/bin/bash
     # Mihomo Metrics Collector — K8s containerized version
-    # Dependencies (curl, jq, bash) are installed by Deployment args before this script runs.
+    # curl/jq/bash are baked into ghcr.io/lynskylate/mihomo-metrics:alpine3.19.
     set -euo pipefail
 
     MIHOMO_API="${MIHOMO_API:-http://100.121.0.67:9090}"
@@ -141,7 +141,8 @@ spec:
         kubernetes.io/hostname: gtr
       containers:
         - name: collector
-          image: alpine:3.19
+          image: ghcr.io/lynskylate/mihomo-metrics:alpine3.19
+          imagePullPolicy: Always
           command: ["/bin/bash"]
           args:
             - "/scripts/mihomo-metrics.sh"
@@ -157,8 +158,6 @@ spec:
               value: "http://100.121.0.67:8428"  # Bare-metal VM on GTR — update to K8s Service DNS when VM migrates in stage 2
             - name: INTERVAL
               value: "30"
-          # Root required for apk add at startup. Dropping capabilities provides
-          # partial hardening. Consider pre-building a custom image in a future phase.
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

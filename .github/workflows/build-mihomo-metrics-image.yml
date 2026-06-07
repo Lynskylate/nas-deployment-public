@@ -4,13 +4,17 @@ on:
   workflow_dispatch:
   push:
     paths:
+      - '.github/workflows/build-mihomo-metrics-image.yml'
       - 'platform/images/mihomo-metrics/**'
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      packages: write
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 

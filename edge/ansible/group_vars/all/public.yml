@@ -95,6 +95,7 @@ k3s_cluster_dns: 10.61.0.10
 k3s_flannel_backend: "vxlan"
 k3s_flannel_iface: "tailscale0"
 k3s_embedded_registry: true
+k3s_p2p_port: 5101
 k3s_disable_components:
 - traefik
 - servicelb

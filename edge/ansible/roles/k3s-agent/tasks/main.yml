@@ -18,6 +18,10 @@
   ansible.builtin.set_fact:
     k3s_agent_effective_ip: "{{ k3s_agent_tailscale_ip_cmd.stdout_lines[0] }}"
 
+- name: Derive effective K3s agent server URL
+  ansible.builtin.set_fact:
+    k3s_agent_effective_server_url: "{{ k3s_agent_server_url | default(k3s_server_url) }}"
+
 - name: Ensure K3s agent config directory exists
   ansible.builtin.file:
     path: "{{ k3s_agent_config_dir }}"
@@ -92,9 +96,10 @@
     k3s_agent_install_env: >-
       {{ {'INSTALL_K3S_CHANNEL': k3s_channel,
           'INSTALL_K3S_MIRROR': k3s_mirror,
-          'K3S_URL': k3s_server_url,
+          'K3S_URL': k3s_agent_effective_server_url,
           'K3S_TOKEN': k3s_cluster_token,
-          'INSTALL_K3S_EXEC': 'agent'}
+          'INSTALL_K3S_EXEC': 'agent',
+          'K3S_P2P_PORT': (k3s_p2p_port | string)}
         | combine((k3s_mirror != 'cn') | ternary({'http_proxy': github_download_proxy, 'https_proxy': github_download_proxy}, {}))
         | dict2items | rejectattr('value', 'equalto', '') | items2dict }}
 
@@ -120,6 +125,17 @@
   when: k3s_containerd_http_proxy | default('') | length > 0
   notify: restart k3s agent
 
+- name: Configure K3s embedded registry P2P port
+  ansible.builtin.blockinfile:
+    path: "/etc/systemd/system/{{ k3s_agent_service_name }}.service.env"
+    block: |
+      K3S_P2P_PORT={{ k3s_p2p_port }}
+    marker: "# {mark} ANSIBLE MANAGED: k3s p2p port"
+    create: true
+    mode: "0600"
+  when: k3s_p2p_port is defined
+  notify: restart k3s agent
+
 - name: Flush K3s agent handlers
   ansible.builtin.meta: flush_handlers
 
@@ -140,6 +156,7 @@
     msg:
       - "host={{ inventory_hostname }}"
       - "k3s_agent_ip={{ k3s_agent_effective_ip }}"
+      - "k3s_agent_server={{ k3s_agent_effective_server_url }}"
       - "k3s_agent_state={{ k3s_agent_state.stdout }}"
       - "health={{ k3s_agent_health.stdout | default('unknown') }}"
       - "needs_install={{ k3s_agent_needs_install | default(true) }}"

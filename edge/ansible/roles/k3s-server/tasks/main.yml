@@ -77,6 +77,8 @@
     else
       echo "healthy"
     fi
+  args:
+    executable: /bin/bash
   register: k3s_server_health
   changed_when: false
   failed_when: false
@@ -93,7 +95,8 @@
     k3s_server_install_env: >-
       {{ {'INSTALL_K3S_CHANNEL': k3s_channel,
           'INSTALL_K3S_MIRROR': k3s_mirror,
-          'INSTALL_K3S_EXEC': 'server'}
+          'INSTALL_K3S_EXEC': 'server',
+          'K3S_P2P_PORT': (k3s_p2p_port | string)}
         | combine((k3s_mirror != 'cn') | ternary({'http_proxy': github_download_proxy, 'https_proxy': github_download_proxy}, {}))
         | dict2items | rejectattr('value', 'equalto', '') | items2dict }}
 
@@ -119,6 +122,17 @@
   when: k3s_containerd_http_proxy | default('') | length > 0
   notify: restart k3s server
 
+- name: Configure K3s embedded registry P2P port
+  ansible.builtin.blockinfile:
+    path: "/etc/systemd/system/{{ k3s_server_service_name }}.service.env"
+    block: |
+      K3S_P2P_PORT={{ k3s_p2p_port }}
+    marker: "# {mark} ANSIBLE MANAGED: k3s p2p port"
+    create: true
+    mode: "0600"
+  when: k3s_p2p_port is defined
+  notify: restart k3s server
+
 - name: Flush K3s server handlers
   ansible.builtin.meta: flush_handlers
 
@@ -137,6 +151,8 @@
 
 - name: Wait for K3s service to stabilize
   ansible.builtin.shell: systemctl is-active --quiet {{ k3s_server_service_name }}
+  args:
+    executable: /bin/bash
   register: k3s_service_check
   retries: 12
   delay: 5

@@ -93,3 +93,26 @@
         fi
       changed_when: false
       when: not (edge_tunnel_server_enabled | bool)
+
+    - name: Probe Tailscale direct path to configured peer
+      ansible.builtin.command: "tailscale ping -c 5 {{ tailscale_p2p_peer_ip }}"
+      register: tailscale_p2p_probe
+      changed_when: false
+      failed_when: false
+      retries: 3
+      delay: 5
+      until:
+        - tailscale_p2p_probe.rc == 0
+        - "'via DERP(' not in tailscale_p2p_probe.stdout"
+      when: tailscale_p2p_heal_enabled | default(false) | bool
+
+    - name: Assert Tailscale direct path to configured peer
+      ansible.builtin.assert:
+        that:
+          - tailscale_p2p_probe.rc == 0
+          - "'via DERP(' not in tailscale_p2p_probe.stdout"
+        fail_msg: >-
+          Tailscale direct path check failed for {{ tailscale_p2p_peer_name }}:
+          stdout={{ tailscale_p2p_probe.stdout | default('') | trim }}
+          stderr={{ tailscale_p2p_probe.stderr | default('') | trim }}
+      when: tailscale_p2p_heal_enabled | default(false) | bool

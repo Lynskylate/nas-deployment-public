@@ -1,0 +1,51 @@
+---
+- name: Assert Tailscale P2P heal settings when enabled
+  ansible.builtin.assert:
+    that:
+      - tailscale_p2p_peer_name | length > 0
+      - tailscale_p2p_peer_ip | length > 0
+  when: tailscale_p2p_heal_enabled | bool
+
+- name: Install Tailscale P2P heal script
+  ansible.builtin.template:
+    src: tailscale-p2p-heal.sh.j2
+    dest: "{{ tailscale_p2p_heal_script_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+  when: tailscale_p2p_heal_enabled | bool
+
+- name: Install Tailscale P2P heal systemd service
+  ansible.builtin.template:
+    src: tailscale-p2p-heal.service.j2
+    dest: "/etc/systemd/system/{{ tailscale_p2p_heal_service_name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  when: tailscale_p2p_heal_enabled | bool
+  notify: reload tailscale p2p heal systemd
+
+- name: Install Tailscale P2P heal systemd timer
+  ansible.builtin.template:
+    src: tailscale-p2p-heal.timer.j2
+    dest: "/etc/systemd/system/{{ tailscale_p2p_heal_timer_name }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: tailscale_p2p_heal_enabled | bool
+  notify: reload tailscale p2p heal systemd
+
+- name: Flush Tailscale P2P heal handlers
+  ansible.builtin.meta: flush_handlers
+  when: tailscale_p2p_heal_enabled | bool
+
+- name: Run Tailscale P2P heal immediately
+  ansible.builtin.command: "systemctl start {{ tailscale_p2p_heal_service_name }}.service"
+  when: tailscale_p2p_heal_enabled | bool
+
+- name: Ensure Tailscale P2P heal timer is enabled
+  ansible.builtin.systemd:
+    name: "{{ tailscale_p2p_heal_timer_name }}"
+    enabled: true
+    state: started
+  when: tailscale_p2p_heal_enabled | bool

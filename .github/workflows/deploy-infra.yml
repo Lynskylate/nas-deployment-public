@@ -57,6 +57,9 @@ jobs:
           vault_repo_ssh_key: ${{ secrets.VAULT_REPO_SSH_KEY }}
           sops_age_key: ${{ secrets.SOPS_AGE_KEY }}
 
+      - name: Validate CI topology contract
+        run: python3 scripts/validate_ci_topology.py
+
       - name: Connect Tailscale
         uses: tailscale/github-action@v3
         with:

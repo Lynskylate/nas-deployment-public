@@ -34,6 +34,8 @@
   ansible.builtin.shell: |
     set -o pipefail
     tailscale debug prefs 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('NetfilterMode',0))"
+  args:
+    executable: /bin/bash
   register: k3s_prereq_tailscale_netfilter
   changed_when: false
   failed_when: false
@@ -43,6 +45,8 @@
 - name: Set tailscale --netfilter-mode=nodivert
   ansible.builtin.shell: |
     tailscale set --netfilter-mode=nodivert --accept-routes
+  args:
+    executable: /bin/bash
   register: k3s_prereq_tailscale_status
   changed_when: k3s_prereq_tailscale_status.rc == 0
   when:

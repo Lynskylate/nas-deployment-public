@@ -6,6 +6,7 @@
   roles:
     - role: k3s-prereq
     - role: k3s-agent
+    - role: tailscale-p2p-heal
 
 - name: Apply K3s node labels
   hosts: gtr_core:edge_tencent

@@ -24,6 +24,7 @@
   roles:
     - role: node-exporter
     - role: edge-tailscale
+    - role: tailscale-p2p-heal
     - role: edge-vector
       when: edge_vector_enabled | bool
     - role: edge-envoy

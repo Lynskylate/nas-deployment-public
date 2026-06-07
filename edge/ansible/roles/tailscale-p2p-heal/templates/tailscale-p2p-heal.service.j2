@@ -1,0 +1,8 @@
+[Unit]
+Description=Heal Tailscale direct path to {{ tailscale_p2p_peer_name }}
+After=network-online.target tailscaled.service
+Wants=network-online.target tailscaled.service
+
+[Service]
+Type=oneshot
+ExecStart={{ tailscale_p2p_heal_script_path }}

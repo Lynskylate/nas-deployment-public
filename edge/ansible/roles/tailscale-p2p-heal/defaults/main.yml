@@ -1,0 +1,11 @@
+---
+tailscale_p2p_heal_enabled: false
+tailscale_p2p_peer_name: ""
+tailscale_p2p_peer_ip: ""
+tailscale_p2p_heal_script_path: /usr/local/sbin/tailscale-p2p-heal
+tailscale_p2p_heal_service_name: tailscale-p2p-heal
+tailscale_p2p_heal_timer_name: tailscale-p2p-heal.timer
+tailscale_p2p_heal_interval: 2min
+tailscale_p2p_heal_attempts: 6
+tailscale_p2p_heal_retry_delay_seconds: 3
+tailscale_p2p_heal_ping_count: 3

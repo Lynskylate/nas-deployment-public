@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodically heal Tailscale direct path to {{ tailscale_p2p_peer_name }}
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec={{ tailscale_p2p_heal_interval }}
+RandomizedDelaySec=15s
+Persistent=true
+Unit={{ tailscale_p2p_heal_service_name }}.service
+
+[Install]
+WantedBy=timers.target

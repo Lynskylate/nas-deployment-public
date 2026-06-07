@@ -8,6 +8,7 @@
 - name: Deploy resource manifest to GTR
   hosts: gtr_core
   become: true
+  gather_facts: false
 
   tasks:
     - name: Ensure /etc/gtr directory exists

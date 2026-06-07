@@ -2,6 +2,7 @@
 - name: Pre-create Tailscale Operator prerequisites on aliyun K3s
   hosts: edge_aliyun
   become: true
+  gather_facts: false
 
   tasks:
     - name: Ensure tailscale namespace exists

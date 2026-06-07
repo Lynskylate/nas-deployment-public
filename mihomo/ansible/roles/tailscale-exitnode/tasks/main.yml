@@ -55,25 +55,42 @@
     name: tailscale-exitnode-fix
     enabled: true
     daemon_reload: true
+    state: started
 
-- name: Restart tailscale-exitnode-fix service to apply idempotent rules
-  ansible.builtin.systemd:
-    name: tailscale-exitnode-fix
-    state: restarted
-
-- name: Verify MASQUERADE rule is active
+- name: Check MASQUERADE rule before forced repair
   ansible.builtin.shell: |
     {{ nft_binary }} list chain ip nat POSTROUTING 2>/dev/null | grep -q masquerade
   register: masq_check
   changed_when: false
-  failed_when: masq_check.rc != 0
+  failed_when: false
 
-- name: Verify policy routing rule is active
+- name: Check policy routing rule before forced repair
   ansible.builtin.shell: |
     {{ ip_binary }} rule show | grep -q 'from {{ tailscale_cidr }} lookup {{ mihomo_route_table }}'
   register: rule_check
   changed_when: false
-  failed_when: rule_check.rc != 0
+  failed_when: false
+
+- name: Re-run tailscale-exitnode-fix only when routing rules drifted
+  ansible.builtin.systemd:
+    name: tailscale-exitnode-fix
+    state: restarted
+  when:
+    - masq_check.rc != 0 or rule_check.rc != 0
+
+- name: Verify MASQUERADE rule is active
+  ansible.builtin.shell: |
+    {{ nft_binary }} list chain ip nat POSTROUTING 2>/dev/null | grep -q masquerade
+  register: masq_check_final
+  changed_when: false
+  failed_when: masq_check_final.rc != 0
+
+- name: Verify policy routing rule is active
+  ansible.builtin.shell: |
+    {{ ip_binary }} rule show | grep -q 'from {{ tailscale_cidr }} lookup {{ mihomo_route_table }}'
+  register: rule_check_final
+  changed_when: false
+  failed_when: rule_check_final.rc != 0
 
 - name: Create resolved.conf.d directory
   ansible.builtin.file:
@@ -186,16 +203,26 @@
     mode: '0644'
     owner: root
     group: root
+  notify:
+    - reload systemd
+    - restart node_exporter
 
-- name: Restart node_exporter to enable textfile collector
+- name: Ensure node_exporter is enabled and running
   ansible.builtin.systemd:
     name: node_exporter
-    state: restarted
-    daemon_reload: true
+    enabled: true
+    state: started
+
+- name: Check existing textfile collector output
+  ansible.builtin.stat:
+    path: "{{ tailscale_exitnode_textfile_dir }}/tailscale_exitnode.prom"
+  register: tailscale_exitnode_textfile
+  changed_when: false
 
 - name: Wait for monitor to generate initial metrics
   ansible.builtin.pause:
     seconds: 5
+  when: not tailscale_exitnode_textfile.stat.exists
 
 - name: Verify textfile collector is working
   ansible.builtin.command:

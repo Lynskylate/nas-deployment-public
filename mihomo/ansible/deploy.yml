@@ -5,6 +5,7 @@
 - name: Deploy Mihomo to GTR Server
   hosts: client_server
   become: true
+  gather_facts: false
 
   pre_tasks:
     - name: Display deployment info

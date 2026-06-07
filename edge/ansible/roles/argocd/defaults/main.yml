@@ -6,6 +6,3 @@ argocd_namespace: argocd
 argocd_server_deployment: argocd-server
 argocd_initial_admin_secret: argocd-initial-admin-secret
 argocd_repo_url: "https://github.com/Lynskylate/nas-deployment-public.git"
-# [VERIFY] Pin version when upgrading
-argocd_cli_download_url: "https://github.com/argoproj/argo-cd/releases/download/v2.12.0/argocd-linux-amd64"
-argocd_cli_path: "/usr/local/bin/argocd"

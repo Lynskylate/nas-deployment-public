@@ -14,3 +14,8 @@
   ansible.builtin.systemd:
     name: systemd-resolved
     state: restarted
+
+- name: restart node_exporter
+  ansible.builtin.systemd:
+    name: node_exporter
+    state: restarted

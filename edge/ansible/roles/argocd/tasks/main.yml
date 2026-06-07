@@ -134,31 +134,6 @@
     APPEOF
   changed_when: false
 
-- name: Download Argo CD CLI
-  ansible.builtin.get_url:
-    url: "{{ argocd_cli_download_url }}"
-    dest: "{{ argocd_cli_path }}"
-    owner: root
-    group: root
-    mode: "0755"
-  environment:
-    http_proxy: "{{ github_download_proxy | default('') }}"
-    https_proxy: "{{ github_download_proxy | default('') }}"
-  when:
-    - argocd_needs_redeploy | bool
-    - github_download_proxy | default('') | length > 0
-
-- name: Download Argo CD CLI (no proxy fallback)
-  ansible.builtin.get_url:
-    url: "{{ argocd_cli_download_url }}"
-    dest: "{{ argocd_cli_path }}"
-    owner: root
-    group: root
-    mode: "0755"
-  when:
-    - argocd_needs_redeploy | bool
-    - github_download_proxy | default('') | length == 0
-
 - name: Annotate argocd-server Service for Tailscale Operator
   ansible.builtin.shell: |
     k3s kubectl -n {{ argocd_namespace }} annotate service {{ argocd_server_deployment }} \

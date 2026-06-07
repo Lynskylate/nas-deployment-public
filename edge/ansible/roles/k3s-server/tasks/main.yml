@@ -49,15 +49,6 @@
     k3s_effective_install_script_url: >-
       {{ (k3s_mirror == 'cn') | ternary('https://rancher-mirror.rancher.cn/k3s/k3s-install.sh', k3s_install_script_url) }}
 
-- name: Download K3s installer
-  ansible.builtin.get_url:
-    url: "{{ k3s_effective_install_script_url }}"
-    dest: "{{ k3s_install_script_path }}"
-    owner: root
-    group: root
-    mode: "0755"
-  environment: "{{ {'http_proxy': github_download_proxy, 'https_proxy': github_download_proxy} if (github_download_proxy | default('') | length > 0) else {} }}"
-
 - name: Check if K3s binary exists
   ansible.builtin.stat:
     path: /usr/local/bin/k3s
@@ -89,6 +80,16 @@
       {{ not k3s_server_binary.stat.exists
          or not k3s_server_service.stat.exists
          or k3s_server_health.stdout != 'healthy' }}
+
+- name: Download K3s installer
+  ansible.builtin.get_url:
+    url: "{{ k3s_effective_install_script_url }}"
+    dest: "{{ k3s_install_script_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+  environment: "{{ {'http_proxy': github_download_proxy, 'https_proxy': github_download_proxy} if (github_download_proxy | default('') | length > 0) else {} }}"
+  when: k3s_server_needs_install | bool
 
 - name: Build K3s server install environment
   ansible.builtin.set_fact:

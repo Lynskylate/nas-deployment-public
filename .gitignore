@@ -5,6 +5,8 @@
 *.dec
 *.decrypted
 *.runtime.yml
+__pycache__/
+*.pyc
 .env.decrypted
 .vault/
 docs/issues/

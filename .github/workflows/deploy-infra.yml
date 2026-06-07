@@ -3,10 +3,15 @@ name: Deploy Infrastructure
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - "docs/**"
-      - "*.md"
-      - ".gitignore"
+    paths:
+      - ".github/workflows/deploy-infra.yml"
+      - ".github/actions/bootstrap-deploy-env/**"
+      - ".github/scripts/**"
+      - "edge/ansible/**"
+      - "mihomo/ansible/**"
+      - ".resource-manifest.yml"
+      - "scripts/resolve_deploy_plan.py"
+      - "scripts/validate_ci_topology.py"
   workflow_dispatch:
     inputs:
       target:
@@ -47,20 +52,40 @@ jobs:
       run_k3s_platform: ${{ steps.resolve.outputs.run_k3s_platform }}
       run_validate_contract: ${{ steps.resolve.outputs.run_validate_contract }}
       edge_targets: ${{ steps.resolve.outputs.edge_targets }}
+      run_gtr_mihomo: ${{ steps.resolve.outputs.run_gtr_mihomo }}
+      run_gtr_resource_manifest: ${{ steps.resolve.outputs.run_gtr_resource_manifest }}
+      run_gtr_ai_tools: ${{ steps.resolve.outputs.run_gtr_ai_tools }}
+      run_platform_argocd: ${{ steps.resolve.outputs.run_platform_argocd }}
+      run_platform_sealed_secrets: ${{ steps.resolve.outputs.run_platform_sealed_secrets }}
+      run_platform_tailscale_operator: ${{ steps.resolve.outputs.run_platform_tailscale_operator }}
+      runner_needs_tailscale: ${{ steps.resolve.outputs.runner_needs_tailscale }}
     steps:
       - uses: actions/checkout@v6
 
+      - id: resolve
+        name: Resolve deploy plan
+        shell: bash
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+          GITHUB_SHA: ${{ github.sha }}
+          INPUT_TARGET: ${{ inputs.target }}
+        run: python3 scripts/resolve_deploy_plan.py >> "$GITHUB_OUTPUT"
+
+      - name: Validate CI topology contract
+        if: steps.resolve.outputs.run_validate_contract == 'true'
+        run: python3 scripts/validate_ci_topology.py
+
       - id: bootstrap
+        if: steps.resolve.outputs.runner_needs_tailscale == 'true'
         uses: ./.github/actions/bootstrap-deploy-env
         with:
           vault_repo_slug: ${{ vars.VAULT_REPO_SLUG }}
           vault_repo_ssh_key: ${{ secrets.VAULT_REPO_SSH_KEY }}
           sops_age_key: ${{ secrets.SOPS_AGE_KEY }}
 
-      - name: Validate CI topology contract
-        run: python3 scripts/validate_ci_topology.py
-
       - name: Connect Tailscale
+        if: steps.resolve.outputs.runner_needs_tailscale == 'true'
         uses: tailscale/github-action@v3
         with:
           oauth-client-id: ${{ steps.bootstrap.outputs.ts_oauth_client_id }}
@@ -68,6 +93,7 @@ jobs:
           tags: tag:ci
 
       - name: Diagnose Tailscale status
+        if: steps.resolve.outputs.runner_needs_tailscale == 'true'
         run: |
           echo "=== Tailscale status ==="
           tailscale status
@@ -93,82 +119,13 @@ jobs:
           '
 
       - name: Test connectivity to GTR
+        if: steps.resolve.outputs.runner_needs_tailscale == 'true'
         run: |
           echo "=== Ping GTR Tailscale IP ==="
           ping -c 2 -W 5 "${{ env.GTR_TAILSCALE_IP }}" || echo "Ping failed (non-fatal, continuing)"
           echo
           echo "=== SSH to GTR ==="
           ssh -o ConnectTimeout=10 root@gtr.tail414c32.ts.net "hostname && uptime"
-
-      - id: resolve
-        name: Resolve deploy plan
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            target="${{ inputs.target }}"
-          else
-            target="all"
-          fi
-
-          run_gtr=false
-          run_edge=false
-          run_k3s_server=false
-          run_k3s_agent=false
-          run_k3s_platform=false
-          run_validate_contract=false
-          edge_targets='[]'
-
-          case "$target" in
-            all)
-              run_gtr=true
-              run_edge=true
-              run_k3s_server=true
-              run_k3s_agent=true
-              run_k3s_platform=true
-              run_validate_contract=true
-              edge_targets='["remote_proxy","aliyun","tencent"]'
-              ;;
-            gtr_core)
-              run_gtr=true
-              run_validate_contract=true
-              ;;
-            gtr_k3s_platform)
-              run_gtr=true
-              run_edge=true
-              run_k3s_server=true
-              run_k3s_agent=true
-              run_k3s_platform=true
-              edge_targets='["aliyun","tencent"]'
-              ;;
-            edge_remote_proxy)
-              run_edge=true
-              edge_targets='["remote_proxy"]'
-              ;;
-            edge_aliyun)
-              run_edge=true
-              edge_targets='["aliyun"]'
-              ;;
-            edge_tencent)
-              run_edge=true
-              edge_targets='["tencent"]'
-              ;;
-            *)
-              echo "Unsupported target: $target" >&2
-              exit 1
-              ;;
-          esac
-
-          {
-            echo "target=$target"
-            echo "run_gtr=$run_gtr"
-            echo "run_edge=$run_edge"
-            echo "run_k3s_server=$run_k3s_server"
-            echo "run_k3s_agent=$run_k3s_agent"
-            echo "run_k3s_platform=$run_k3s_platform"
-            echo "run_validate_contract=$run_validate_contract"
-            echo "edge_targets=$edge_targets"
-          } >> "$GITHUB_OUTPUT"
 
       - if: always()
         name: Cleanup vault artifacts
@@ -191,6 +148,7 @@ jobs:
           sops_age_key: ${{ secrets.SOPS_AGE_KEY }}
 
       - name: Connect Tailscale
+        if: needs.preflight.outputs.runner_needs_tailscale == 'true'
         uses: tailscale/github-action@v3
         with:
           oauth-client-id: ${{ steps.bootstrap.outputs.ts_oauth_client_id }}
@@ -198,18 +156,21 @@ jobs:
           tags: tag:ci
 
       - name: Add GTR host alias
+        if: needs.preflight.outputs.runner_needs_tailscale == 'true'
         run: echo "${{ env.GTR_TAILSCALE_IP }} gtr gtr.tail414c32.ts.net" | sudo tee -a /etc/hosts
 
       - name: Deploy Mihomo + Exitnode
+        if: needs.preflight.outputs.run_gtr_mihomo == 'true'
         working-directory: mihomo/ansible
         run: ansible-playbook -i inventory.ini deploy.yml --limit gtr -v
 
       - name: Deploy resource manifest
+        if: needs.preflight.outputs.run_gtr_resource_manifest == 'true'
         working-directory: edge/ansible
         run: ansible-playbook -i inventory-edge.ini deploy-resource-manifest.yml -v
 
       - name: Deploy AI tools and Slock daemon
-        if: needs.preflight.outputs.run_k3s_agent != 'true'
+        if: needs.preflight.outputs.run_gtr_ai_tools == 'true' && needs.preflight.outputs.run_k3s_agent != 'true'
         working-directory: edge/ansible
         run: ansible-playbook -i inventory-edge.ini deploy-gtr-ai-tools.yml -v
 
@@ -262,6 +223,7 @@ jobs:
           sops_age_key: ${{ secrets.SOPS_AGE_KEY }}
 
       - name: Connect Tailscale
+        if: matrix.target == 'tencent'
         uses: tailscale/github-action@v3
         with:
           oauth-client-id: ${{ steps.bootstrap.outputs.ts_oauth_client_id }}
@@ -269,6 +231,7 @@ jobs:
           tags: tag:ci
 
       - name: Add GTR host alias
+        if: matrix.target == 'tencent'
         run: echo "${{ env.GTR_TAILSCALE_IP }} gtr gtr.tail414c32.ts.net" | sudo tee -a /etc/hosts
 
       - name: Deploy edge baseline to ${{ matrix.target }}
@@ -284,7 +247,7 @@ jobs:
         run: bash .github/scripts/cleanup-vault.sh
 
   deploy-k3s-server:
-    needs: [preflight, deploy-gtr]
+    needs: preflight
     if: needs.preflight.outputs.run_k3s_server == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -299,16 +262,6 @@ jobs:
           vault_repo_ssh_key: ${{ secrets.VAULT_REPO_SSH_KEY }}
           sops_age_key: ${{ secrets.SOPS_AGE_KEY }}
 
-      - name: Connect Tailscale
-        uses: tailscale/github-action@v3
-        with:
-          oauth-client-id: ${{ steps.bootstrap.outputs.ts_oauth_client_id }}
-          oauth-secret: ${{ steps.bootstrap.outputs.ts_oauth_secret }}
-          tags: tag:ci
-
-      - name: Add GTR host alias
-        run: echo "${{ env.GTR_TAILSCALE_IP }} gtr gtr.tail414c32.ts.net" | sudo tee -a /etc/hosts
-
       - name: Deploy K3s server on aliyun
         working-directory: edge/ansible
         run: ansible-playbook -i inventory-edge.ini deploy-gtr-k3s-server.yml -v
@@ -322,8 +275,11 @@ jobs:
         run: bash .github/scripts/cleanup-vault.sh
 
   deploy-k3s-agent:
-    needs: [preflight, deploy-k3s-server, deploy-edge]
-    if: needs.preflight.outputs.run_k3s_agent == 'true'
+    needs: [preflight, deploy-k3s-server]
+    if: |
+      always() &&
+      needs.preflight.outputs.run_k3s_agent == 'true' &&
+      (needs.deploy-k3s-server.result == 'success' || needs.deploy-k3s-server.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: production
@@ -361,7 +317,10 @@ jobs:
 
   deploy-platform-operators:
     needs: [preflight, deploy-k3s-agent]
-    if: needs.preflight.outputs.run_k3s_platform == 'true'
+    if: |
+      always() &&
+      needs.preflight.outputs.run_k3s_platform == 'true' &&
+      (needs.deploy-k3s-agent.result == 'success' || needs.deploy-k3s-agent.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: production
@@ -375,33 +334,28 @@ jobs:
           vault_repo_ssh_key: ${{ secrets.VAULT_REPO_SSH_KEY }}
           sops_age_key: ${{ secrets.SOPS_AGE_KEY }}
 
-      - name: Connect Tailscale
-        uses: tailscale/github-action@v3
-        with:
-          oauth-client-id: ${{ steps.bootstrap.outputs.ts_oauth_client_id }}
-          oauth-secret: ${{ steps.bootstrap.outputs.ts_oauth_secret }}
-          tags: tag:ci
-
-      - name: Add GTR host alias
-        run: echo "${{ env.GTR_TAILSCALE_IP }} gtr gtr.tail414c32.ts.net" | sudo tee -a /etc/hosts
-
       - name: Deploy Argo CD
+        if: needs.preflight.outputs.run_platform_argocd == 'true'
         working-directory: edge/ansible
         run: ansible-playbook -i inventory-edge.ini deploy-platform-argocd.yml -v
 
       - name: Verify Argo CD
+        if: needs.preflight.outputs.run_platform_argocd == 'true'
         working-directory: edge/ansible
         run: ansible-playbook -i inventory-edge.ini verify-platform-argocd.yml -v
 
       - name: Deploy Sealed Secrets
+        if: needs.preflight.outputs.run_platform_sealed_secrets == 'true'
         working-directory: edge/ansible
         run: ansible-playbook -i inventory-edge.ini deploy-platform-sealed-secrets.yml -v
 
       - name: Verify Sealed Secrets
+        if: needs.preflight.outputs.run_platform_sealed_secrets == 'true'
         working-directory: edge/ansible
         run: ansible-playbook -i inventory-edge.ini verify-platform-sealed-secrets.yml -v
 
       - name: Deploy Tailscale Operator prerequisites
+        if: needs.preflight.outputs.run_platform_tailscale_operator == 'true'
         working-directory: edge/ansible
         run: ansible-playbook -i inventory-edge.ini deploy-platform-tailscale-operator.yml -v
 
@@ -420,6 +374,7 @@ jobs:
           echo "  cd nas-deployment-vault && git add infra/sealed-secrets/ && git commit -m 'backup sealed-secrets key' && git push"
 
       - name: Verify Tailscale Operator sync status
+        if: needs.preflight.outputs.run_platform_tailscale_operator == 'true'
         working-directory: edge/ansible
         run: ansible-playbook -i inventory-edge.ini verify-platform-tailscale-operator.yml -v
 
@@ -429,7 +384,10 @@ jobs:
 
   validate-contract:
     needs: [preflight, deploy-gtr]
-    if: needs.preflight.outputs.run_validate_contract == 'true'
+    if: |
+      always() &&
+      needs.preflight.outputs.run_validate_contract == 'true' &&
+      (needs.deploy-gtr.result == 'success' || needs.deploy-gtr.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: production

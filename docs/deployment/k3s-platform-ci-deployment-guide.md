@@ -12,18 +12,25 @@
 
 ## CI 部署流程
 
-### 部署顺序（严格依赖）
+### 部署顺序（当前 workflow）
 
 ```
-deploy-gtr
-  ├→ deploy-k3s-server (aliyun)
-  └→ deploy-edge (aliyun, tencent, remote_proxy)
+preflight
+  ├→ deploy-gtr
+  ├→ deploy-edge (按变更选择 remote_proxy / aliyun / tencent)
+  └→ deploy-k3s-server (aliyun)
        └→ deploy-k3s-agent (gtr, tencent)
             └→ deploy-platform-operators
                  ├→ deploy-platform-argocd
                  ├→ deploy-platform-sealed-secrets
                  └→ deploy-platform-tailscale-operator
 ```
+
+说明：
+
+- `push` 触发不再默认全量部署，而是由 `scripts/resolve_deploy_plan.py` 按变更路径决定需要运行的 job 与子步骤
+- `preflight` 只在 runner 真的需要访问 tailnet 私网节点时才 bootstrap 并连接 Tailscale
+- `deploy-platform-operators` 现在会按组件粒度选择 ArgoCD / Sealed Secrets / Tailscale Operator，而不是每次全跑
 
 ### 各阶段说明
 
@@ -45,6 +52,7 @@ deploy-gtr
 
 | 路径 | 固定策略 | 原因 |
 |------|---------|------|
+| GitHub Actions → remote_proxy SSH | `inventory-edge.ini` 中 `remote_proxy ansible_host=<公网 IP>` | runner 与 remote_proxy 都在美国，没有必要先接入 tailnet 再跨洋转发 |
 | GitHub Actions → aliyun SSH | `inventory-edge.ini` 中 `aliyun ansible_host=<公网 IP>` | aliyun↔gtr 的 Tailscale 直连会受云厂商/运营商 UDP 路径影响，不能作为 CI 依赖 |
 | K3s 默认 API | `group_vars/all/public.yml` 中 `k3s_server_url=https://<aliyun Tailscale IP>:6443` | gtr、本地控制面默认仍优先走 Tailscale |
 | tencent → K3s API | `host_vars/tencent.yml` 中 `k3s_agent_server_url=https://<aliyun 公网 IP>:6443` | tencent→aliyun 的 Tailscale TCP 路径不可靠，需显式走公网 |
@@ -57,6 +65,12 @@ deploy-gtr
 - `deploy-infra.yml` 的 `preflight`
 - `verify-gtr-k3s-server.yml`
 - `verify-gtr-k3s-agent.yml`
+
+其中 `scripts/validate_ci_topology.py` 还会显式阻止：
+
+- `remote_proxy ansible_host` 被改回 Tailscale CGNAT 地址
+- `aliyun ansible_host` 被改回 Tailscale CGNAT 地址
+- `tencent` 的 agent API 回退到不稳定的 Tailscale TCP 路径
 
 如果未来要改回“CI 全量依赖 Tailscale 直连”，必须先证明 aliyun/tencent 的真实网络路径稳定，再同步更新这些校验。
 
@@ -90,7 +104,19 @@ deploy-gtr
 | ArgoCD manifest 下载 | `github_download_proxy` | ✅ 本次修复已添加 |
 | SealedSecrets manifest 下载 | 先下载本地再 apply | ✅ 已有 |
 
-### 4. Shell 兼容性
+### 4. 避免重复部署与下载
+
+当前 CI 已增加以下快路径：
+
+| 组件 | 快路径判断 | 节省点 |
+|------|-----------|-------|
+| preflight | 仅当 `gtr/tencent` 等私网目标参与时才连 Tailscale | 避免美国 runner 为无关 job 先接入 tailnet |
+| K3s server / agent | 仅在二进制、service 或健康检查不满足时才下载安装脚本 | 避免重复下载 `k3s-install.sh` |
+| ArgoCD | deployment 已 ready、版本匹配、bootstrap 资源存在时跳过 reapply | 避免重复下载 install manifest / CLI 与长时间 rollout |
+| Sealed Secrets | controller image/rollout 正常且测试 secret 正常解封时跳过重装 | 避免重复下载 manifest、重复备份私钥 |
+| deploy-platform-operators | 仅执行受本次变更影响的 operator | 避免 platform 全量串行重跑 |
+
+### 5. Shell 兼容性
 
 CI runner 使用 Ubuntu，`/bin/sh` 是 `dash`，不支持 `set -o pipefail`。
 

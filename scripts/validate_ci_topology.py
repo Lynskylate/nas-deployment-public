@@ -60,6 +60,25 @@ def main() -> int:
     notes: list[str] = []
 
     try:
+        remote_proxy_inventory_vars = find_inventory_host_vars(INVENTORY_PATH, "remote_proxy")
+    except KeyError as exc:
+        errors.append(f"inventory 缺少 remote_proxy 主机定义: {exc}")
+        remote_proxy_inventory_vars = {}
+
+    remote_proxy_ansible_host = remote_proxy_inventory_vars.get("ansible_host", "")
+    if not remote_proxy_ansible_host:
+        errors.append("`inventory-edge.ini` 中 remote_proxy 缺少 `ansible_host`。")
+    else:
+        try:
+            if is_cgnat_ip(remote_proxy_ansible_host):
+                errors.append(
+                    f"remote_proxy 的 `ansible_host={remote_proxy_ansible_host}` 落在 Tailscale CGNAT 段。"
+                    "CI 管理面必须走公网 IP，避免美国 runner 为了部署美国节点先接入 tailnet。"
+                )
+        except ValueError as exc:
+            errors.append(f"remote_proxy 的 `ansible_host` 不是合法 IP: {exc}")
+
+    try:
         aliyun_inventory_vars = find_inventory_host_vars(INVENTORY_PATH, "aliyun")
     except KeyError as exc:
         errors.append(f"inventory 缺少 aliyun 主机定义: {exc}")
@@ -126,6 +145,7 @@ def main() -> int:
             f"当前为 {tencent_server_host} != {aliyun_ansible_host}。"
         )
 
+    notes.append(f"remote_proxy SSH 管理面: {remote_proxy_ansible_host or 'missing'}")
     notes.append(f"aliyun SSH 管理面: {aliyun_ansible_host or 'missing'}")
     notes.append(f"cluster 默认 API: {k3s_server_url or 'missing'}")
     notes.append(f"aliyun Tailscale IP: {k3s_server_tailscale_ip or 'missing'}")

@@ -12,6 +12,39 @@
       | k3s kubectl apply -f -
   changed_when: false
 
+- name: Check existing Argo CD server image
+  ansible.builtin.shell: |
+    k3s kubectl -n {{ argocd_namespace }} get deployment/{{ argocd_server_deployment }} \
+      -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true
+  register: argocd_server_image
+  changed_when: false
+  failed_when: false
+
+- name: Check existing Argo CD server rollout
+  ansible.builtin.shell: |
+    k3s kubectl -n {{ argocd_namespace }} rollout status deployment/{{ argocd_server_deployment }} --timeout=15s
+  register: argocd_server_rollout
+  changed_when: false
+  failed_when: false
+
+- name: Check existing Argo CD bootstrap resources
+  ansible.builtin.shell: |
+    set -euo pipefail
+    k3s kubectl -n {{ argocd_namespace }} get secret {{ argocd_initial_admin_secret }} -o name >/dev/null
+    k3s kubectl -n {{ argocd_namespace }} get application platform-apps -o name >/dev/null
+  args:
+    executable: /bin/bash
+  register: argocd_bootstrap_resources
+  changed_when: false
+  failed_when: false
+
+- name: Determine whether Argo CD reapply is needed
+  ansible.builtin.set_fact:
+    argocd_needs_redeploy: >-
+      {{ (argocd_version not in (argocd_server_image.stdout | default('')))
+         or argocd_server_rollout.rc != 0
+         or argocd_bootstrap_resources.rc != 0 }}
+
 - name: Apply Argo CD install manifest
   ansible.builtin.shell: |
     k3s kubectl apply -n {{ argocd_namespace }} -f {{ argocd_install_manifest_url }}
@@ -19,13 +52,17 @@
   environment:
     http_proxy: "{{ github_download_proxy | default('') }}"
     https_proxy: "{{ github_download_proxy | default('') }}"
-  when: github_download_proxy | default('') | length > 0
+  when:
+    - argocd_needs_redeploy | bool
+    - github_download_proxy | default('') | length > 0
 
 - name: Apply Argo CD install manifest (no proxy fallback)
   ansible.builtin.shell: |
     k3s kubectl apply -n {{ argocd_namespace }} -f {{ argocd_install_manifest_url }}
   changed_when: false
-  when: github_download_proxy | default('') | length == 0
+  when:
+    - argocd_needs_redeploy | bool
+    - github_download_proxy | default('') | length == 0
 
 - name: Wait for Argo CD deployment rollout
   ansible.builtin.shell: |
@@ -33,6 +70,14 @@
   changed_when: false
   register: argocd_rollout
   failed_when: argocd_rollout.rc != 0
+  when: argocd_needs_redeploy | bool
+
+- name: Re-check Argo CD deployment rollout on fast path
+  ansible.builtin.set_fact:
+    argocd_rollout:
+      stdout: "{{ argocd_server_rollout.stdout | default('already ready') }}"
+      rc: "{{ argocd_server_rollout.rc }}"
+  when: not (argocd_needs_redeploy | bool)
 
 - name: Get initial admin password
   ansible.builtin.shell: |
@@ -99,7 +144,9 @@
   environment:
     http_proxy: "{{ github_download_proxy | default('') }}"
     https_proxy: "{{ github_download_proxy | default('') }}"
-  when: github_download_proxy | default('') | length > 0
+  when:
+    - argocd_needs_redeploy | bool
+    - github_download_proxy | default('') | length > 0
 
 - name: Download Argo CD CLI (no proxy fallback)
   ansible.builtin.get_url:
@@ -108,7 +155,9 @@
     owner: root
     group: root
     mode: "0755"
-  when: github_download_proxy | default('') | length == 0
+  when:
+    - argocd_needs_redeploy | bool
+    - github_download_proxy | default('') | length == 0
 
 - name: Annotate argocd-server Service for Tailscale Operator
   ansible.builtin.shell: |
@@ -122,6 +171,7 @@
 - name: Show Argo CD admin password hint
   ansible.builtin.debug:
     msg:
+      - "argocd_needs_redeploy={{ argocd_needs_redeploy }}"
       - "Argo CD admin password has been retrieved ({{ argocd_admin_password.stdout | length }} chars)."
       - "To retrieve it later: k3s kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d"
       - ""

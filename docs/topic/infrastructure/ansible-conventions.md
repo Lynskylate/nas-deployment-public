@@ -108,7 +108,7 @@ roles_path = ./roles:../../shadowsocks-shadowtls/ansible/roles
 | `deploy-gtr-ai-tools.yml` | AI tools + Slock daemon | `gtr_core` |
 | `deploy-resource-manifest.yml` | resource manifest | `gtr_core` |
 | `deploy-platform-argocd.yml` | ArgoCD bootstrap | `edge_aliyun` |
-| `deploy-platform-sealed-secrets.yml` | SealedSecrets bootstrap | `edge_aliyun` |
+| `bootstrap-platform-sealed-secrets-key.yml` | Sealed Secrets 私钥恢复（controller 由 Argo CD 管理） | `edge_tencent` |
 | `deploy-platform-tailscale-operator.yml` | Tailscale Operator | `edge_aliyun` |
 | `verify-edge-common.yml` | edge 验证 | `edge_*` |
 | `verify-gtr-k3s-server.yml` | K3s server 验证 | `edge_aliyun` |

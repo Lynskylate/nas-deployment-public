@@ -77,6 +77,13 @@ runs:
         sops --decrypt .vault/repo/ansible/mihomo/group_vars/all/secret.sops.yml > mihomo/ansible/group_vars/all/secret.runtime.yml
         sops --decrypt .vault/repo/ansible/mihomo/group_vars/aliyun/secret.sops.yml > mihomo/ansible/group_vars/aliyun/secret.runtime.yml
 
+        # Sealed Secrets private key — restored from vault so the controller
+        # can reuse it on fresh clusters instead of generating a new keypair.
+        if [ -f .vault/repo/infra/sealed-secrets/key-backup.enc.yaml ]; then
+          sops --decrypt .vault/repo/infra/sealed-secrets/key-backup.enc.yaml \
+            > .vault/repo/infra/sealed-secrets/key-backup.runtime.yaml
+        fi
+
         sops --decrypt .vault/repo/grafana/secret.sops.yml > grafana/secret.runtime.yml
         chmod 600 \
           edge/ansible/group_vars/all/secret.runtime.yml \

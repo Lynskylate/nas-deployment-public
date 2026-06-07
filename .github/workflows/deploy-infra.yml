@@ -344,10 +344,10 @@ jobs:
         working-directory: edge/ansible
         run: ansible-playbook -i inventory-edge.ini verify-platform-argocd.yml -v
 
-      - name: Deploy Sealed Secrets
+      - name: Bootstrap Sealed Secrets private key
         if: needs.preflight.outputs.run_platform_sealed_secrets == 'true'
         working-directory: edge/ansible
-        run: ansible-playbook -i inventory-edge.ini deploy-platform-sealed-secrets.yml -v
+        run: ansible-playbook -i inventory-edge.ini bootstrap-platform-sealed-secrets-key.yml -v
 
       - name: Verify Sealed Secrets
         if: needs.preflight.outputs.run_platform_sealed_secrets == 'true'
@@ -358,21 +358,6 @@ jobs:
         if: needs.preflight.outputs.run_platform_tailscale_operator == 'true'
         working-directory: edge/ansible
         run: ansible-playbook -i inventory-edge.ini deploy-platform-tailscale-operator.yml -v
-
-      - name: "Manual: Back up Sealed Secrets private key to vault"
-        if: needs.preflight.outputs.run_platform_sealed_secrets == 'true'
-        run: |
-          echo "=== Sealed Secrets key backup (manual) ==="
-          echo "The deploy playbook exports the private key and then cleans it up."
-          echo "To back it up, re-export and encrypt it:"
-          echo ""
-          echo "  ssh root@100.102.140.59 k3s kubectl get secret -n kube-system \\"
-          echo "    -l sealedsecrets.bitnami.com/sealed-secrets-key \\"
-          echo "    -o yaml > /tmp/sealed-secrets-key-backup.yaml"
-          echo "  sops --encrypt --age <AGE_KEY> /tmp/sealed-secrets-key-backup.yaml \\"
-          echo "    > nas-deployment-vault/infra/sealed-secrets/key-backup.enc.yaml"
-          echo "  rm -f /tmp/sealed-secrets-key-backup.yaml"
-          echo "  cd nas-deployment-vault && git add infra/sealed-secrets/ && git commit -m 'backup sealed-secrets key' && git push"
 
       - name: Verify Tailscale Operator sync status
         if: needs.preflight.outputs.run_platform_tailscale_operator == 'true'

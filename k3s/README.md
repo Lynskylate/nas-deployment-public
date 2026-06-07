@@ -22,7 +22,7 @@ K3s 集群平台文档索引。完整部署指南见 [`AGENTS.md`](../AGENTS.md)
 |-----------|--------|------------|
 | **K3s** (server + agents) | ✅ | Ansible (`edge/ansible/`) |
 | **Argo CD** | ✅ | Ansible bootstrap → self-managed via App-of-Apps |
-| **Sealed Secrets** | ✅ | Ansible bootstrap → ArgoCD Application |
+| **Sealed Secrets** | ✅ | ArgoCD 管理（Helm chart），私钥从 vault 恢复 |
 | **Tailscale Operator** | ✅ | ArgoCD Application (GitOps) |
 
 ## Deployment
@@ -36,7 +36,7 @@ ansible-playbook -i inventory-edge.ini deploy-gtr-k3s-agent.yml
 
 # Platform operators
 ansible-playbook -i inventory-edge.ini deploy-platform-argocd.yml
-ansible-playbook -i inventory-edge.ini deploy-platform-sealed-secrets.yml
+ansible-playbook -i inventory-edge.ini bootstrap-platform-sealed-secrets-key.yml
 ansible-playbook -i inventory-edge.ini deploy-platform-tailscale-operator.yml
 ```
 

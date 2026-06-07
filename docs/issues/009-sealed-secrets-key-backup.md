@@ -1,5 +1,9 @@
 # [Follow-up] Sealed Secrets Private Key Backup
 
+> **Status: Superseded** — 私钥已备份到 vault，后续管理见
+> [sealed-secrets-argocd-unification.md](../proposals/sealed-secrets-argocd-unification.md)。
+> 本 issue 不再适用。
+
 ## Summary
 
 Sealed Secrets controller 安装后，其私钥需要备份到 `nas-deployment-vault` 仓库，以确保灾难恢复时能够解密已有的 SealedSecrets。

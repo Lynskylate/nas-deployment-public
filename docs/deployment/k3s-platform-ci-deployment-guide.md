@@ -22,7 +22,7 @@ preflight
        └→ deploy-k3s-agent (gtr, tencent)
             └→ deploy-platform-operators
                  ├→ deploy-platform-argocd
-                 ├→ deploy-platform-sealed-secrets
+                 ├→ bootstrap-platform-sealed-secrets-key
                  └→ deploy-platform-tailscale-operator
 ```
 
@@ -39,7 +39,7 @@ preflight
 | 1 | `deploy-gtr-k3s-server.yml` | 在 aliyun 上安装 K3s server | Tailscale 已认证，ci 用户可用 |
 | 2 | `deploy-gtr-k3s-agent.yml` | 在 gtr/tencent 上安装 K3s agent | K3s server API 可达 |
 | 3 | `deploy-platform-argocd.yml` | 安装 ArgoCD + App-of-Apps | K3s 集群健康 |
-| 4 | `deploy-platform-sealed-secrets.yml` | 预设 SealedSecrets 基础环境 | ArgoCD 运行中 |
+| 4 | `bootstrap-platform-sealed-secrets-key.yml` | 从 vault 恢复私钥到集群 | ArgoCD 运行中 |
 | 5 | `deploy-platform-tailscale-operator.yml` | 预设 Tailscale Operator 基础环境 + HelmChart | ArgoCD 运行中 |
 
 ---
@@ -225,7 +225,7 @@ k3s kubectl run dns-test --image=busybox:1.36 --restart=Never --rm -it -- \
 | `deploy-platform-argocd.yml` | 依赖 secret.runtime.yml 中的 deploy key | vault 中有 `argocd_repo_ssh_key`（已确认） |
 | `deploy-platform-tailscale-operator.yml` | 缺少 ServiceAccount/RBAC | 改用 K3s HelmChart CRD（Helm chart 自带 RBAC） |
 | `group_vars/all/public.yml` | 重复 YAML key | 删除重复的 `k3s_containerd_https_proxy` |
-| `deploy-platform-sealed-secrets.yml` | 私钥备份被立即删除 | 改为持久化到 `/var/lib/rancher/k3s/` |
+| `bootstrap-platform-sealed-secrets-key.yml`（原 `deploy-platform-sealed-secrets.yml`） | 私钥备份被立即删除 | 改为从 vault 恢复；controller 由 Argo CD 管理 |
 | `deploy-platform-tailscale-operator.yml` | Proxy pods 误调度到 tencent（Tailscale TCP 不通） | 创建 `ProxyClass gtr-only` 强制 proxy pods 到 gtr |
 | `platform/applications/tailscale-operator.yaml` | 无 proxy nodeSelector | 添加 `defaultProxyClass: gtr-only` |
 | `roles/argocd/tasks/main.yml` | Service annotation 无 proxy-class | 添加 `tailscale.com/proxy-class=gtr-only` |

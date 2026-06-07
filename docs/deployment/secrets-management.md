@@ -74,13 +74,25 @@ sops --decrypt nas-deployment-vault/ansible/edge/host_vars/gtr/secret.sops.yml \
 
 Ansible 自动合并同目录下的所有 YAML 文件，后者覆盖前者。
 
-## Sealed Secrets Key Backup
+## Sealed Secrets Key Management
 
-SealedSecrets 的私钥是集群内自动生成的，需要手动备份：
+Sealed Secrets controller 的私钥存储在 `nas-deployment-vault/infra/sealed-secrets/key-backup.enc.yaml`（SOPS + AGE 加密），是私钥的 single source of truth。
+
+### 集群重建时恢复私钥
+
+CI 在部署 Sealed Secrets 前会自动从 vault 解密私钥并 apply 到集群：
+
+1. `bootstrap-deploy-env` action 解密 `key-backup.enc.yaml` → `key-backup.runtime.yaml`
+2. `bootstrap-platform-sealed-secrets-key.yml` playbook 将私钥 apply 为 Secret（带 `sealedsecrets.bitnami.com/sealed-secrets-key` label）
+3. Argo CD 部署 controller，controller 检测到已有私钥，复用
+
+### 首次部署（全新集群，仅首次需要）
+
+首次部署时集群中没有私钥，controller 会自动生成新密钥对。生成后需手动备份到 vault：
 
 ```bash
 # 导出
-ssh root@<aliyun-tailscale-ip> kubectl get secret -n kube-system \
+ssh root@<server-ip> k3s kubectl get secret -n kube-system \
   -l sealedsecrets.bitnami.com/sealed-secrets-key \
   -o yaml > /tmp/sealed-secrets-key-backup.yaml
 
@@ -95,8 +107,6 @@ rm -f /tmp/sealed-secrets-key-backup.yaml
 cd nas-deployment-vault && git add infra/sealed-secrets/ && \
   git commit -m 'backup sealed-secrets key' && git push
 ```
-
-私钥在 K3s 节点上持久化到 `/var/lib/rancher/k3s/sealed-secrets-key-backup.yaml`。
 
 ## Checking for Plaintext Secrets
 

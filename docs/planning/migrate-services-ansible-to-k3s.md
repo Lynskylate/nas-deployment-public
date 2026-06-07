@@ -89,7 +89,7 @@ K3s Cluster (4 nodes)
 | 6 | **Mihomo** (GTR) | TUN + net admin + 订阅/Hysteria2 代理出口 | `mihomo/ansible/deploy.yml` |
 | 7 | **Tailscale exit node fix** | nftables + policy routing | `mihomo/ansible/deploy-exitnode.yml` |
 | 8 | **ArgoCD 引导** | K3s 平台层引导 | `deploy-platform-argocd.yml` |
-| 9 | **Sealed Secrets 引导** | 同上 | `deploy-platform-sealed-secrets.yml` |
+| 9 | **Sealed Secrets 私钥恢复** | 同上 | `bootstrap-platform-sealed-secrets-key.yml`（controller 由 Argo CD 管理） |
 | 10 | **Tailscale Operator 引导** | 同上 | `deploy-platform-tailscale-operator.yml` |
 | 11 | **AI tools** (Claude/Codex/OpenCode) | 用户交互 CLI | `deploy-gtr-ai-tools.yml` |
 | 12 | **Podman + project runtime** | K3s 互补运行时 | `deploy-gtr-project-runtime.yml` |

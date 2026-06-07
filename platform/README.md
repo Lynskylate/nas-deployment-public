@@ -18,7 +18,7 @@ platform/
 ## 管理策略
 
 - **Argo CD** 通过 Ansible 引导安装，之后自我管理
-- **Sealed Secrets** 通过 Ansible 引导安装，然后注册为 Argo CD Application
+- **Sealed Secrets** 完全由 Argo CD 管理（Helm chart），私钥从 vault 恢复（bootstrap playbook）
 - **Tailscale Operator** 完全通过 Argo CD Application 管理（GitOps）
 
 ## 使用说明

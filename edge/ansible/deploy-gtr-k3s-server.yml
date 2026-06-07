@@ -9,7 +9,7 @@
     - role: tailscale-p2p-heal
 
 - name: Apply K3s node labels
-  hosts: edge_aliyun
+  hosts: edge_tencent
   become: true
 
   tasks:

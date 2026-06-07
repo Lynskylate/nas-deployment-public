@@ -13,7 +13,8 @@
   become: true
 
   tasks:
-    - name: Apply node labels
+    - name: Apply node labels (via server kubeconfig)
+      delegate_to: "{{ groups['edge_tencent'][0] }}"
       ansible.builtin.command: "k3s kubectl label node {{ inventory_hostname }} {{ item.key }}={{ item.value }} --overwrite"
       loop: "{{ k3s_node_labels | default({}) | dict2items }}"
       changed_when: false

@@ -51,19 +51,22 @@ nas-deployment-public/
 
 ```
 K3s Cluster
-├─ aliyun (control-plane): Tailscale 100.100.99.70
+├─ tencent (control-plane): Tailscale 100.99.48.76
 ├─ gtr (agent):            100.121.0.67
-└─ tencent (agent):        100.99.48.76
-API: https://100.100.99.70:6443
+└─ aliyun (agent):         100.100.99.70
+API: https://100.99.48.76:6443
 Pod CIDR: 10.60/16, Service CIDR: 10.61/16, Flannel: vxlan (tailscale0)
 
 GTR Core (192.168.31.59)
 ├─ Envoy → Grafana :3000 / VictoriaMetrics :8428 / VictoriaLogs :8429 / VictoriaTraces :9428
 └─ Mihomo :7890（shadow-tls SIP003 代理）
 
-Edge Nodes (remote_proxy, aliyun, tencent)
+Edge Nodes (remote_proxy, aliyun)
 ├─ Envoy :80/:443 + Node Exporter
 └─ Vector → OTLP → forwards logs/traces to GTR via Tailscale
+
+K3s Server (tencent)
+└─ Envoy :80/:443 + Node Exporter
 
 Remote Proxy (66.154.100.187)
 └─ Shadow-TLS :443 (SNI: www.microsoft.com) → Shadowsocks :8388

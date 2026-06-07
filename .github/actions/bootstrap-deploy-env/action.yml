@@ -77,6 +77,12 @@ runs:
         sops --decrypt .vault/repo/ansible/mihomo/group_vars/all/secret.sops.yml > mihomo/ansible/group_vars/all/secret.runtime.yml
         sops --decrypt .vault/repo/ansible/mihomo/group_vars/aliyun/secret.sops.yml > mihomo/ansible/group_vars/aliyun/secret.runtime.yml
 
+        # GitHub token for ArgoCD repo access (PAT auth over HTTPS)
+        if [ -f .vault/repo/infra/argocd/github-token.sops.yml ]; then
+          sops --decrypt .vault/repo/infra/argocd/github-token.sops.yml > edge/ansible/group_vars/all/github-token.runtime.yml
+          chmod 600 edge/ansible/group_vars/all/github-token.runtime.yml
+        fi
+
         # Sealed Secrets private key — restored from vault so the controller
         # can reuse it on fresh clusters instead of generating a new keypair.
         if [ -f .vault/repo/infra/sealed-secrets/key-backup.enc.yaml ]; then

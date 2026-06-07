@@ -262,7 +262,7 @@ jobs:
           vault_repo_ssh_key: ${{ secrets.VAULT_REPO_SSH_KEY }}
           sops_age_key: ${{ secrets.SOPS_AGE_KEY }}
 
-      - name: Deploy K3s server on aliyun
+      - name: Deploy K3s server on tencent
         working-directory: edge/ansible
         run: ansible-playbook -i inventory-edge.ini deploy-gtr-k3s-server.yml -v
 
@@ -303,7 +303,7 @@ jobs:
       - name: Add GTR host alias
         run: echo "${{ env.GTR_TAILSCALE_IP }} gtr gtr.tail414c32.ts.net" | sudo tee -a /etc/hosts
 
-      - name: Deploy K3s agents on GTR and tencent
+      - name: Deploy K3s agents on GTR, aliyun, remote_proxy
         working-directory: edge/ansible
         run: ansible-playbook -i inventory-edge.ini deploy-gtr-k3s-agent.yml -v
 

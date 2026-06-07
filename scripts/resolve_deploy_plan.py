@@ -200,18 +200,17 @@ def classify_path(path: str, plan: DeployPlan) -> None:
 
     if path.startswith("edge/ansible/host_vars/aliyun/"):
         plan.edge_targets.add("aliyun")
+        plan.run_k3s_agent = True
+        return
+
+    if path == "edge/ansible/host_vars/tencent.yml":
+        plan.edge_targets.add("tencent")
         plan.run_k3s_server = True
         plan.run_k3s_platform = True
         plan.run_validate_contract = True
         plan.run_platform_argocd = True
         plan.run_platform_sealed_secrets = True
         plan.run_platform_tailscale_operator = True
-        return
-
-    if path == "edge/ansible/host_vars/tencent.yml":
-        plan.edge_targets.add("tencent")
-        plan.run_k3s_agent = True
-        plan.run_validate_contract = True
         return
 
     if path.startswith("edge/ansible/host_vars/gtr/"):

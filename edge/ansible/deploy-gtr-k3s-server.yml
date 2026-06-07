@@ -1,6 +1,6 @@
 ---
-- name: Deploy K3s server on aliyun
-  hosts: edge_aliyun
+- name: Deploy K3s server on tencent
+  hosts: edge_tencent
   become: true
 
   roles:

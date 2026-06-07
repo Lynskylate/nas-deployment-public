@@ -1,6 +1,6 @@
 ---
 - name: Verify Tailscale Operator on aliyun K3s
-  hosts: edge_aliyun
+  hosts: edge_tencent
   become: true
   gather_facts: false
 

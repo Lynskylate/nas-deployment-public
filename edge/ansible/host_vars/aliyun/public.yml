@@ -1,18 +1,17 @@
 ---
+# === 原 K3s server（已迁移至 tencent），现降级为 agent ===
+
 ansible_ssh_common_args: '-o ServerAliveInterval=15 -o ServerAliveCountMax=4 -o ConnectTimeout=30 -o ConnectionAttempts=3'
 envoy_bin_path: "/usr/bin"
 edge_manage_envoy_binary_dir: false
 edge_tunnel_server_enabled: false
 tailscale_p2p_heal_enabled: true
-tailscale_p2p_peer_name: gtr
-tailscale_p2p_peer_ip: 100.121.0.67
+tailscale_p2p_peer_name: vmtencent
+tailscale_p2p_peer_ip: 100.99.48.76
 
-# K3s control-plane (server) node
-k3s_server_tailscale_ip: 100.100.99.70
-k3s_server_tls_sans:
-- aliyun
-- 100.100.99.70
-- 47.120.46.128
+# Agent 配置 — 通过 tencent 公网 IP 连接新 server
+# （aliyun→tencent Tailscale TCP 可能被阻断，走公网安全）
+k3s_agent_server_url: "https://129.211.12.63:6443"
 k3s_containerd_http_proxy: "http://100.121.0.67:7890"
 k3s_prereq_tailscale_nodivert: true
 k3s_registry_mirrors: {}
@@ -21,7 +20,6 @@ k3s_node_labels:
   gtr.io/visibility: public
 
 # aliyun 有公网 IP 可直接访问 GitHub，不需要通过 GTR 代理。
-# 代理走 Tailscale DERP 太慢，大文件下载超时。
 github_download_proxy: ""
 
 # Aliyun edge node only exposes edge-proxy functions.

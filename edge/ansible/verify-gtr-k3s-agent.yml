@@ -1,6 +1,6 @@
 ---
-- name: Verify K3s agents on GTR and tencent
-  hosts: gtr_core:edge_tencent
+- name: Verify K3s agents on GTR
+  hosts: gtr_core
   become: true
 
   tasks:

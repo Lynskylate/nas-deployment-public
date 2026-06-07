@@ -2,8 +2,8 @@ gtr_expected_proxy_ports:
 - 1080
 - 7890
 tailscale_p2p_heal_enabled: true
-tailscale_p2p_peer_name: vmaliyun
-tailscale_p2p_peer_ip: 100.100.99.70
+tailscale_p2p_peer_name: vmtencent
+tailscale_p2p_peer_ip: 100.99.48.76
 github_download_proxy: http://127.0.0.1:7890
 k3s_containerd_http_proxy: "http://127.0.0.1:7890"
 k3s_containerd_https_proxy: "http://127.0.0.1:7890"

@@ -1,6 +1,6 @@
 ---
-- name: Deploy K3s agents on GTR and tencent
-  hosts: gtr_core:edge_tencent
+- name: Deploy K3s agents on GTR, aliyun, remote_proxy
+  hosts: gtr_core:edge_aliyun:edge_remote_proxy
   become: true
 
   roles:
@@ -9,7 +9,7 @@
     - role: tailscale-p2p-heal
 
 - name: Apply K3s node labels
-  hosts: gtr_core:edge_tencent
+  hosts: gtr_core:edge_aliyun:edge_remote_proxy
   become: true
 
   tasks:

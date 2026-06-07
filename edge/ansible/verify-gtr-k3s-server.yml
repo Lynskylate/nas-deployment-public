@@ -1,6 +1,6 @@
 ---
-- name: Verify K3s server on aliyun
-  hosts: edge_aliyun
+- name: Verify K3s server on tencent
+  hosts: edge_tencent
   become: true
 
   tasks:

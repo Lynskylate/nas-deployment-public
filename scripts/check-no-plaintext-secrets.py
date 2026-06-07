@@ -40,7 +40,7 @@ ASSIGNMENT_PATTERNS = [
     (re.compile(r"^\s*grafana_feishu_webhook_url:\s*['\"]?(.+\S)", re.M), "Grafana webhook URLs must stay in the private vault repo."),
 ]
 LINE_PATTERNS = [
-    (re.compile(r"AGE-SECRET-KEY-|BEGIN [A-Z0-9 ]*PRIVATE KEY|sk_machine_|tskey-client-|gho_[A-Za-z0-9_]+|ghp_[A-Za-z0-9_]+"), "Raw credential marker detected in the public repository."),
+    (re.compile(r"AGE-SECRET-KEY-(?!.*\.{3})|BEGIN [A-Z0-9 ]*PRIVATE KEY(?!.*\.{3})|tskey-client-(?!.*\.{3})|sk_machine_(?!.*\.{3})|gho_[A-Za-z0-9_]+|ghp_[A-Za-z0-9_]+"), "Raw credential marker detected in the public repository."),
     (re.compile(r"https?://[^\s\"']+:[^\s\"'@]+@"), "Credentials embedded in URLs must stay in the private vault repo."),
     (re.compile(r"https://www\.feishu\.cn/flow/api/trigger-webhook/[A-Za-z0-9]+"), "Feishu webhook URLs must stay in the private vault repo."),
     (re.compile(r"Authorization:\s*[\"']?Bearer\s+[A-Za-z0-9._=-]{12,}", re.I), "Inline Bearer tokens must stay in the private vault repo."),

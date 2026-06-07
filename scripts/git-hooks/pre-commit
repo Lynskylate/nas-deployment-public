@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# pre-commit hook — runs pre-commit on staged files.
+# Install: copy to .git/hooks/pre-commit and chmod +x
+# Requires: pre-commit (pip install pre-commit) and Go (for actionlint)
+#
+# If pre-commit is not installed, this hook falls back to a basic YAML check.
+
+set -euo pipefail
+
+if command -v pre-commit &>/dev/null; then
+    pre-commit run --hook-stage commit --color always
+else
+    echo "⚠  pre-commit not installed. Running basic checks only."
+    echo "   Install: pip install pre-commit && pre-commit install"
+
+    # Basic YAML syntax check on staged .yml/.yaml files
+    STAGED_YAML=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.ya?ml$' || true)
+    if [ -n "$STAGED_YAML" ]; then
+        echo "Checking staged YAML files:"
+        for f in $STAGED_YAML; do
+            if ! python3 -c "import yaml; yaml.safe_load(open('$f'))" 2>/dev/null; then
+                echo "❌ YAML syntax error in $f"
+                echo "   Run: python3 -c 'import yaml; yaml.safe_load(open(\"$f\"))'"
+            fi
+        done
+    fi
+
+    # Plaintext secret guard
+    if [ -f scripts/check-no-plaintext-secrets.py ]; then
+        python3 scripts/check-no-plaintext-secrets.py || {
+            echo "❌ Plaintext secret guard failed. Aborting commit."
+            exit 1
+        }
+    fi
+fi

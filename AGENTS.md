@@ -12,7 +12,7 @@
 
 3. **K3s 平台 CI 部署** — ArgoCD + SealedSecrets + Tailscale Operator 通过 GitHub Actions 自动部署。详见 [`docs/deployment/k3s-platform-ci-deployment-guide.md`](docs/deployment/k3s-platform-ci-deployment-guide.md)
 
-4. **Pre-commit** — 提交前运行 `pre-commit run --all-files`。包含 `actionlint`（workflow lint）、`check-yaml`、`trailing-whitespace` 等。actionlint 需 Go: `go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7`
+4. **Pre-commit** — 提交前自动运行 `actionlint`（workflow lint）、`check-yaml`、明文凭据守卫等。安装：`bash scripts/setup-git-hooks.sh`。若有 `pre-commit` 则体验更完整：`pip install pre-commit && pre-commit install`
 
 ## 仓库结构
 

@@ -17,6 +17,10 @@ k3s_node_labels:
   gtr.io/region: cn
   gtr.io/visibility: public
 
+# aliyun 有公网 IP 可直接访问 GitHub，不需要通过 GTR 代理。
+# 代理走 Tailscale DERP 太慢，大文件下载超时。
+github_download_proxy: ""
+
 # Aliyun edge node only exposes edge-proxy functions.
 envoy_domain_routes:
   - name: node_exporter_metrics

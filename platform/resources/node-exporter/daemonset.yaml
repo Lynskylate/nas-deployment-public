@@ -1,0 +1,100 @@
+# Node Exporter — DaemonSet + headless Service
+# Replaces bare-metal systemd service on all K3s nodes.
+# Uses hostNetwork to bind directly to port 9100.
+#
+# IMPORTANT: Stop bare-metal node_exporter on all K3s nodes BEFORE deploying,
+# otherwise port 9100 will conflict (hostNetwork: true).
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-exporter
+  namespace: monitoring
+  labels:
+    app: node-exporter
+spec:
+  selector:
+    matchLabels:
+      app: node-exporter
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: node-exporter
+    spec:
+      hostNetwork: true
+      hostPID: true
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: node-exporter
+          image: prom/node-exporter:v1.8.2
+          args:
+            - "--path.procfs=/host/proc"
+            - "--path.sysfs=/host/sys"
+            - "--path.rootfs=/host/root"
+            - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+            - "--web.listen-address=:9100"
+          ports:
+            - name: metrics
+              containerPort: 9100
+              hostPort: 9100
+              protocol: TCP
+          volumeMounts:
+            - name: proc
+              mountPath: /host/proc
+              readOnly: true
+            - name: sys
+              mountPath: /host/sys
+              readOnly: true
+            - name: root
+              mountPath: /host/root
+              mountPropagation: HostToContainer
+              readOnly: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 24Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: proc
+          hostPath:
+            path: /proc
+        - name: sys
+          hostPath:
+            path: /sys
+        - name: root
+          hostPath:
+            path: /
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: node-exporter
+  namespace: monitoring
+  labels:
+    app: node-exporter
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9100"
+    tailscale.com/expose: "true"
+    tailscale.com/proxy-class: gtr-only
+spec:
+  selector:
+    app: node-exporter
+  ports:
+    - name: metrics
+      port: 9100
+      targetPort: metrics
+      protocol: TCP
+  clusterIP: None

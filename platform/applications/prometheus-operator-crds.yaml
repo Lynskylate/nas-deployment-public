@@ -1,22 +1,23 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: mihomo-monitoring
+  name: prometheus-operator-crds
   namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
 spec:
   project: default
   source:
-    repoURL: https://github.com/Lynskylate/nas-deployment-public.git
-    path: platform/resources/mihomo-monitoring
-    targetRevision: feat/observability-k8s-migration  # revert to "main" before merge
-    directory:
-      recurse: false
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: prometheus-operator-crds
+    targetRevision: 18.x
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring
   syncPolicy:
     automated:
-      prune: true
+      prune: false  # CRDs should never be auto-pruned
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      - ServerSideApply=true

@@ -155,7 +155,7 @@ spec:
             - name: MIHOMO_API
               value: "http://100.121.0.67:9090"
             - name: VICTORIAMETRICS_URL
-              value: "http://100.121.0.67:8428"  # Bare-metal VM on GTR — update to K8s Service DNS when VM migrates in stage 2
+              value: "http://victoriametrics.monitoring.svc:8428"  # K8s Service (migrated from bare-metal 100.121.0.67:8428)
             - name: INTERVAL
               value: "30"
           securityContext:

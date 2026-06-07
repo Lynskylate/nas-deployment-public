@@ -1,0 +1,85 @@
+# VMAgent — scrape proxy managed by VictoriaMetrics Operator
+# Watches ServiceMonitor + VMStaticScrape CRDs, scrapes targets,
+# and remote_writes all metrics to VictoriaMetrics.
+#
+# Architecture:
+#   ServiceMonitor / VMStaticScrape → Operator generates config → VMAgent scrapes → remote_write → VictoriaMetrics
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMAgent
+metadata:
+  name: scraper
+  namespace: monitoring
+spec:
+  selectAllByDefault: true
+  # Watch both VM-native and Prometheus Operator CRDs
+  serviceScrapeSelector: {}
+  serviceScrapeNamespaceSelector: {}
+  podScrapeSelector: {}
+  podScrapeNamespaceSelector: {}
+  remoteWrite:
+    - url: "http://victoriametrics.monitoring.svc:8428/api/v1/write"
+  # Resources for the VMAgent pod itself
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  # Pin to GTR (same node as VictoriaMetrics for low-latency writes)
+  nodeSelector:
+    kubernetes.io/hostname: gtr
+  scrapeInterval: "15s"
+  # Inline scrape config for targets that don't fit CRDs cleanly
+  # (e.g., the VMAgent's own /metrics endpoint)
+  inlineScrapeConfig: |
+    - job_name: vmagent
+      static_configs:
+        - targets: ["localhost:8429"]
+---
+# --- In-cluster ServiceMonitors ---
+
+# VictoriaMetrics self-monitoring
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: victoriametrics
+  namespace: monitoring
+  labels:
+    app: victoriametrics
+spec:
+  selector:
+    matchLabels:
+      app: victoriametrics
+  endpoints:
+    - port: http
+      interval: 15s
+      path: /metrics
+  namespaceSelector:
+    matchNames:
+      - monitoring
+---
+# Node Exporter (DaemonSet headless Service)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: node-exporter
+  namespace: monitoring
+  labels:
+    app: node-exporter
+spec:
+  selector:
+    matchLabels:
+      app: node-exporter
+  endpoints:
+    - port: metrics
+      interval: 15s
+      path: /metrics
+      # Enrich with node labels from pod metadata
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node
+  namespaceSelector:
+    matchNames:
+      - monitoring

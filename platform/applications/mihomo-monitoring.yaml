@@ -6,7 +6,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: git@github.com:Lynskylate/nas-deployment-public.git
+    repoURL: https://github.com/Lynskylate/nas-deployment-public.git
     path: platform/resources/mihomo-monitoring
     targetRevision: main
     directory:

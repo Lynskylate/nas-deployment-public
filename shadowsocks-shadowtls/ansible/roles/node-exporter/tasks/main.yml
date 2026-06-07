@@ -58,7 +58,6 @@
       - "--strip-components=1"
       - "--wildcards"
       - "*/node_exporter"
-    timeout: 300
   environment: "{{ {'http_proxy': github_download_proxy, 'https_proxy': github_download_proxy} if (github_download_proxy | default('') | length > 0) else {} }}"
   register: node_exporter_download_result
   retries: 5

@@ -1,48 +1,75 @@
-# Normalize all text files to LF
+# ============================================================
+# .gitattributes — Normalize all text files to LF
+# Prevents CRLF/LF conflicts between Windows and Linux/macOS
+# ============================================================
 * text=auto eol=lf
 
-# Ansible / config templates
-*.j2 text eol=lf
-*.yml text eol=lf
+# ── Git / repo metadata ──────────────────────────────────────
+.gitattributes text eol=lf
+.gitignore     text eol=lf
+.gitmodules    text eol=lf
+.editorconfig  text eol=lf
+
+# ── Ansible / config templates ───────────────────────────────
+*.j2   text eol=lf
+*.yml  text eol=lf
 *.yaml text eol=lf
 *.json text eol=lf
-*.cfg text eol=lf
-*.ini text eol=lf
+*.cfg  text eol=lf
+*.ini  text eol=lf
 *.toml text eol=lf
 *.conf text eol=lf
 
-# Shell scripts
-*.sh text eol=lf
-*.bash text eol=lf
+# ── Shell scripts ────────────────────────────────────────────
+*.sh     text eol=lf
+*.bash   text eol=lf
+*.env    text eol=lf
+*.env.*  text eol=lf
 
-# Documentation
-*.md text eol=lf
+# ── Documentation ────────────────────────────────────────────
+*.md  text eol=lf
 *.rst text eol=lf
 *.txt text eol=lf
 
-# Python / source
-*.py text eol=lf
+# ── Python / source ──────────────────────────────────────────
+*.py  text eol=lf
 *.pyi text eol=lf
 
-# Makefiles
-Makefile text eol=lf
-makefile text eol=lf
-*.mk text eol=lf
+# ── Makefiles ────────────────────────────────────────────────
+Makefile    text eol=lf
+makefile    text eol=lf
+*.mk        text eol=lf
 
-# GitHub Actions / CI
-*.action text eol=lf
+# ── GitHub Actions / CI ──────────────────────────────────────
+*.action   text eol=lf
 *.workflow text eol=lf
 
-# Binary files (do not normalize)
-*.png binary
-*.jpg binary
+# ── Lock / dependency files ──────────────────────────────────
+*.lock text eol=lf
+
+# ── Proxy / network config ───────────────────────────────────
+*.pac text eol=lf
+
+# ── Binary files (do not normalize, preserve as-is) ─────────
+*.png  binary
+*.jpg  binary
 *.jpeg binary
-*.gif binary
-*.ico binary
-*.pdf binary
-*.zip binary
-*.gz binary
-*.tar binary
-*.xz binary
-*.so binary
-*.bin binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.zip  binary
+*.gz   binary
+*.tar  binary
+*.xz   binary
+*.so   binary
+*.bin  binary
+*.o    binary
+*.a    binary
+*.pyc  binary
+*.pyo  binary
+*.pyd  binary
+*.dll  binary
+*.exe  binary
+*.dmg  binary
+*.deb  binary
+*.rpm  binary

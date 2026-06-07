@@ -288,6 +288,10 @@ rules:
   - IP-CIDR6,fc00::/7,DIRECT
   - IP-CIDR6,fe80::/10,DIRECT
 
+  # Exit node 直连例外
+  - DOMAIN-SUFFIX,deepseek.com,DIRECT
+  - DOMAIN-SUFFIX,packyapi.com,DIRECT
+
   # AI services - use AI group (US/SG/UK/DE nodes, avoid HK)
   - DOMAIN-SUFFIX,openai.com,AI
   - DOMAIN-SUFFIX,chatgpt.com,AI

@@ -48,6 +48,7 @@ tailscale_cidr: 100.64.0.0/10
 mihomo_route_table: 2022
 tailscale_exitnode_rule_priority: 1000
 nft_binary: /usr/sbin/nft
+iptables_binary: /usr/sbin/iptables
 ip_binary: /sbin/ip
 tailscale_exitnode_monitor_interval: 30
 tailscale_exitnode_script_dir: /usr/local/bin

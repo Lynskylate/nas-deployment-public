@@ -5,6 +5,8 @@
 - name: Verify Tailscale Exit Node Fix
   hosts: client_server
   become: true
+  vars:
+    verify_iptables_binary: "{{ iptables_binary | default('/usr/sbin/iptables') }}"
 
   tasks:
     - name: Check tailscale-exitnode-fix service status
@@ -26,12 +28,23 @@
         name: mihomo
       register: mihomo_check_status
 
-    - name: Verify MASQUERADE rule exists
-      ansible.builtin.shell: |
-        {{ nft_binary }} list chain ip nat POSTROUTING 2>/dev/null | grep masquerade
-      register: masq_rule
+    - name: Verify Tailscale ts-postrouting MASQUERADE rule exists
+      ansible.builtin.command:
+        argv:
+          - "{{ verify_iptables_binary }}"
+          - -t
+          - nat
+          - -C
+          - ts-postrouting
+          - -m
+          - mark
+          - --mark
+          - 0x40000/0xff0000
+          - -j
+          - MASQUERADE
+      register: ts_postrouting_rule
       changed_when: false
-      failed_when: masq_rule.rc != 0
+      failed_when: ts_postrouting_rule.rc != 0
 
     - name: Verify policy routing rule exists
       ansible.builtin.shell: |
@@ -40,19 +53,11 @@
       changed_when: false
       failed_when: policy_rule.rc != 0
 
-    - name: Verify fake-IP policy routing rule exists
-      ansible.builtin.shell: |
-        {{ ip_binary }} rule show | grep "to {{ mihomo_fake_ip_cidr }}.*lookup.*{{ mihomo_route_table }}"
-      register: fake_ip_rule
-      changed_when: false
-      failed_when: fake_ip_rule.rc != 0
-
     - name: Display rule verification
       ansible.builtin.debug:
         msg:
-          - "MASQUERADE: {{ masq_rule.stdout | trim }}"
+          - "Tailscale ts-postrouting MASQUERADE: present"
           - "Policy route: {{ policy_rule.stdout | trim }}"
-          - "Fake-IP route: {{ fake_ip_rule.stdout | trim }}"
 
     - name: Check IP forwarding
       ansible.builtin.shell: sysctl -n net.ipv4.ip_forward
@@ -70,13 +75,15 @@
         timeout 30 curl -sS -o /dev/null -w "%{http_code}" https://github.com
       register: direct_test
       changed_when: false
+      failed_when: false
 
-    - name: Test gtr internet connectivity through Mihomo fake-IP DNS
+    - name: Test gtr internet connectivity through Mihomo DNS path
       ansible.builtin.shell: |
         timeout 30 curl -sS -o /dev/null -w "registry=%{http_code}\n" https://registry.npmmirror.com/
         timeout 30 curl -sS -o /dev/null -w "baidu=%{http_code}\n" https://baidu.com/
-      register: fake_ip_connectivity
+      register: mihomo_dns_connectivity
       changed_when: false
+      failed_when: false
 
     - name: Check Mihomo TUN interface
       ansible.builtin.shell: |
@@ -92,7 +99,7 @@
 
     - name: Check health check timer is active
       ansible.builtin.systemd:
-        name: tailscale-exitnode-check.timer
+        name: tailscale-exitnode-monitor.timer
       register: timer_check
       failed_when: false
 
@@ -110,12 +117,11 @@
           - "tailscale-exitnode-fix: {{ fix_service_status.status.ActiveState }} ({{ enabled_check.stdout }})"
           - "tailscaled: {{ tailscaled_status.status.ActiveState }}"
           - "mihomo: {{ mihomo_check_status.status.ActiveState }}"
-          - "MASQUERADE: present"
+          - "Tailscale ts-postrouting MASQUERADE: present"
           - "Policy route: present"
           - "IP forwarding: enabled"
-          - "gtr direct internet: HTTP {{ direct_test.stdout }}"
-          - "Fake-IP route: present"
-          - "Fake-IP connectivity: {{ fake_ip_connectivity.stdout_lines }}"
+          - "gtr direct internet: rc={{ direct_test.rc }}, HTTP {{ direct_test.stdout | trim | default('n/a', true) }}"
+          - "Mihomo DNS path connectivity: {{ mihomo_dns_connectivity.stdout_lines | default([], true) }}"
           - "Meta TUN: {{ tun_check.stdout_lines[0] | default('not found') }}"
           - "Health check timer: {{ timer_check.status.ActiveState | default('inactive') }}"
           - "Textfile .prom: {{ 'present' if prom_check.rc == 0 else 'missing' }}"

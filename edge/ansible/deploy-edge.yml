@@ -2,7 +2,6 @@
 - name: Deploy unified edge baseline to remote_proxy and aliyun
   hosts: edge_hosts
   become: true
-  gather_facts: false
 
   pre_tasks:
     - name: Switch apt to Aliyun mirror (China acceleration)

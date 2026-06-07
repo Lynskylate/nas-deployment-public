@@ -142,9 +142,9 @@ spec:
       containers:
         - name: collector
           image: alpine:3.19
-          command: ["/bin/sh", "-c"]
+          command: ["/bin/bash"]
           args:
-            - "apk add --no-cache curl jq bash >&2 && exec /scripts/mihomo-metrics.sh"
+            - "/scripts/mihomo-metrics.sh"
           env:
             - name: MIHOMO_SECRET
               valueFrom:

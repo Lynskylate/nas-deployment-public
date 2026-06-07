@@ -1,371 +1,277 @@
-# K3s 跨节点网络不通 — 根因分析 & Troubleshooting 上下文
+# Code Context: Observability Stack & Edge Services
 
-> 生成时间: 2026-06-07
-> 任务: 分析 K3s 集群中 Pod 跨节点通信失败的根本原因，输出给后续 agent 进行修复
+## Files Retrieved
 
----
+### Runbooks (service overview)
+- `grafana/README.md` — Grafana on GTR, port 3000, SQLite, data `/usr/local/grafana/data/`
+- `victoriametrics/README.md` — VM on GTR, port 8428, retention 360h, data `/var/lib/victoriametrics/data/`
+- `victorialogs/README.md` — VL on GTR, port 8429, data `/var/lib/victorialogs/data/`
+- `victoriatraces/README.md` — VT on GTR, port 9428, data `/var/lib/victoriatraces/data/`
+- `envoy/README.md` — Envoy on every node, ports 80/443, admin 9901, dynamic config `/etc/envoy/dynamic_config/`
+- `node_exporter/README.md` — Node Exporter on every node, port 9100
 
-## 一、集群拓扑与当前配置
+### Ansible group/host vars (all config knobs)
+- `edge/ansible/group_vars/all/public.yml` (lines 1-115) — **master config file** with all defaults
+- `edge/ansible/host_vars/gtr/public.yml` (lines 1-20) — GTR-specific overrides (proxy ports, k3s node labels)
+- `edge/ansible/host_vars/aliyun/public.yml` (lines 1-35) — Aliyun edge node specific
+- `edge/ansible/host_vars/remote_proxy.yml` (lines 1-24) — Overseas proxy node (tunnel server enabled)
+- `edge/ansible/host_vars/tencent.yml` (lines 1-17) — Tencent edge node (Tailscale TCP broken workaround)
 
-### 节点列表
+### Envoy templates (routing topology)
+- `edge/ansible/roles/edge-envoy/templates/envoy.yaml.j2` (lines 1-35) — Bootstrap: node ID, admin, dynamic resources
+- `edge/ansible/roles/edge-envoy/templates/lds.yaml.j2` (lines 1-115) — Listeners: TLS passthrough, TLS terminate, HTTP plaintext
+- `edge/ansible/roles/edge-envoy/templates/cds.yaml.j2` (lines 1-70) — Clusters: shadow_tls_server, node_exporter, envoy_admin + `envoy_additional_clusters`
+- `edge/ansible/roles/edge-envoy/templates/envoy.service.j2` (lines 1-30) — systemd unit with `CAP_NET_BIND_SERVICE`
 
-| 角色 | 节点 | Tailscale IP | Ansible Inventory 组 | 当前部署 playbook |
-|------|------|-------------|---------------------|-------------------|
-| **Server** (control-plane) | aliyun | `100.102.140.59` | `edge_aliyun` | `deploy-gtr-k3s-server.yml` |
-| **Agent** | gtr | `100.121.0.67` | `gtr_core` | `deploy-gtr-k3s-agent.yml` |
-| **Agent** | tencent | `100.99.48.76` | `edge_tencent` | `deploy-gtr-k3s-agent.yml` |
-| **(非 K3s 节点)** | remote_proxy | `100.66.156.40` | `edge_remote_proxy` | 无 K3s 部署 |
+### Edge deployment roles
+- `edge/ansible/roles/edge-envoy/tasks/main.yml` (lines 1-100) — Deploy envoy: user, dirs, configs, binary download, firewall
+- `edge/ansible/roles/edge-vector/tasks/main.yml` (lines 1-60) — Deploy Vector: user, dirs, config, binary
+- `edge/ansible/roles/edge-vector/templates/vector.yaml.j2` (lines 1-60) — Edge Vector config: reads Envoy access log, scrapes prometheus, ships to VM/VL/VT
+- `edge/ansible/roles/edge-victoriametrics-scrape/tasks/main.yml` (lines 1-55) — Merge `edge_proxy_vm_scrape_jobs` into `/usr/local/victoriametrics/victoriametrics_sd.yaml`
+- `edge/ansible/deploy-edge.yml` (lines 1-40) — Unified edge baseline: node-exporter + tailscale + vector + envoy
+- `edge/ansible/deploy-edge-victoriametrics-scrape.yml` (lines 1-20) — Update VM scrape jobs from gtr
 
-> ⚠️ `remote_proxy` **不是** K3s 节点。`deploy-gtr-k3s-agent.yml` 只覆盖 `gtr_core:edge_tencent`，不包含 `edge_remote_proxy`。
+### Mihomo
+- `mihomo/ansible/group_vars/all/public.yml` (lines 1-55) — Mihomo core config: ports, providers, proxies, DNS, Tailscale exit node
+- `mihomo/ansible/group_vars/aliyun/public.yml` (lines 1-30) — Aliyun mihomo config: points to GTR via Tailscale for logs/traces
+- `mihomo/ansible/roles/mihomo/templates/config.yaml.j2` (lines 1-140) — Full Mihomo config: general, TUN, DNS, proxy-providers, proxy-groups, rules
+- `mihomo/ansible/roles/mihomo/templates/vector.yaml.j2` (lines 1-55) — Mihomo Vector config: reads journald, ships to VL at `127.0.0.1:8429`
+- `mihomo/monitoring/README.md` (full) — Architecture: metrics collector (shell script→VM), WS logs collector→VL
+- `mihomo/monitoring/templates/mihomo-metrics.sh.j2` (lines 1-130) — Shell script: pulls Mihomo API `/traffic`, `/connections`, `/proxies`, pushes to VM `127.0.0.1:8428`
 
-### 网络 CIDR
+### Network Monitor
+- `network-monitor/README.md` (full) — Cron-based script testing sites through Mihomo proxy, logs JSON to file → Vector → VL
+- `network-monitor/network-monitor.sh` (lines 1-120) — Tests ~25 sites through `127.0.0.1:7890`, categories domestic vs international
+- `network-monitor/vector.yaml` (lines 1-75) — Vector config: reads Envoy logs + network-monitor logs, ships to `localhost:8429`
+- `network-monitor/ansible/deploy.yml` (lines 1-60) — Ansible: copies scripts, cron job, logrotate
 
-| 网段 | 值 | 说明 |
-|------|-----|------|
-| Pod CIDR (k3s) | `10.60.0.0/16` | Flannel 分配的子网 |
-| Service CIDR (k3s) | `10.61.0.0/16` | K3s Service 虚拟 IP |
-| Cluster DNS | `10.61.0.10` | CoreDNS Service IP |
-| Tailscale CGNAT | `100.64.0.0/10` | 所有节点都在此范围 |
-| Tailscale /32 端点 | `100.102.140.59/32`, `100.121.0.67/32`, `100.99.48.76/32` | 节点 IP 是点对点 /32 地址 |
-
-### Flannel 配置
-
-```
-flannel-backend: "wireguard-native"
-```
-
-- 文件中无 `flannel-iface` 设置 → Flannel 使用默认接口（即 `node-ip` 对应的路由出口）
-- `node-ip`: 每个节点设置为自己的 Tailscale IP
-- `advertise-address` (server): `100.102.140.59`
-
-### 关键配置文件路径
-
-| 文件 | 说明 |
-|------|------|
-| `edge/ansible/group_vars/all/public.yml` | 共享变量，第 112-132 行是 k3s 配置 |
-| `edge/ansible/host_vars/aliyun/public.yml` | aliyun 特有变量（server IP, registry mirrors） |
-| `edge/ansible/host_vars/gtr/public.yml` | GTR 特有变量（localhost proxy） |
-| `edge/ansible/host_vars/tencent.yml` | tencent 特有变量 |
-| `edge/ansible/roles/k3s-server/templates/config.yaml.j2` | Server config 模板 |
-| `edge/ansible/roles/k3s-agent/templates/config.yaml.j2` | Agent config 模板（仅 4 行） |
-| `edge/ansible/roles/k3s-prereq/defaults/main.yml` | 预置包/模块/sysctl 清单 |
-| `edge/ansible/roles/k3s-prereq/tasks/main.yml` | 预置安装逻辑 |
-| `mihomo/ansible/group_vars/all/public.yml` | Mihomo 配置（DNS、TUN） |
-| `docs/issues/007-k3s-flannel-tailscale-crashloop.md` | 历史 crashloop 诊断文档 |
+### ArgoCD Platform Apps
+- `platform/applications/sealed-secrets.yaml` (lines 1-20) — ArgoCD Application: Bitnami chart, `kube-system` namespace
+- `platform/applications/tailscale-operator.yaml` (lines 1-25) — ArgoCD Application: Tailscale chart, `tailscale` namespace, headless — needs `operator-oauth` Secret
+- `platform/resources/tailscale-proxyclass-gtr-only.yaml` (lines 1-15) — ProxyClass pinning proxy pods to GTR node
 
 ---
 
-## 二、跨节点网络不通的潜在根因（按可能性排序）
+## Key Code
 
-### ⚠️ 根因 1（最可能）：WireGuard-over-WireGuard 双重封装 + MTU 断裂
+### 1. Port Map
 
-**问题机制：**
+| Service | Port | Host | Notes |
+|---------|------|------|-------|
+| Envoy HTTPS | 443 | 0.0.0.0 | `envoy_listener_port` |
+| Envoy HTTP | 80 | 0.0.0.0 | `envoy_http_listener_port` (enabled only on edge nodes) |
+| Envoy Admin | 9901 | 127.0.0.1 | `envoy_admin_port` |
+| Grafana | 3000 | 127.0.0.1 | Hardcoded in Envoy CDS (no variable) |
+| VictoriaMetrics | 8428 | 127.0.0.1 | `victoriametrics_port` |
+| VictoriaLogs | 8429 | 127.0.0.1 | `victorialogs_port` |
+| VictoriaTraces | 9428 | 127.0.0.1 | `victoriatraces_http_port` |
+| Node Exporter | 9100 | 127.0.0.1 | `node_exporter_port` |
+| Mihomo Mixed | 7890 | 0.0.0.0 | `mihomo_mixed_port` |
+| Mihomo API | 9090 | 127.0.0.1 | `mihomo_external_controller` |
+| Mihomo DNS | 100.121.0.67:53 | Local LAN | `mihomo_dns_listen` |
+| Vector API | 8686 | 127.0.0.1 | |
+| Vector OTLP gRPC | 4317 | 127.0.0.1 | `edge_vector_otlp_grpc_listen` |
+| Vector OTLP HTTP | 4318 | 127.0.0.1 | `edge_vector_otlp_http_listen` |
 
-```
-Pod A (10.60.1.2)
-  └→ [flannel.wg] → WireGuard 封装 (加 60 bytes 头)
-       └→ 目标: 100.99.48.76:51820 (Tailscale IP + Flannel WG 端口)
-            └→ [tailscale0] → WireGuard 再次封装 (加 80 bytes 头)
-                 └→ 目标: tencent 公网 IP
-                      └→ [tailscale0] decap → [flannel.wg] decap → Pod B (10.60.2.3)
-```
-
-- Tailscale0 默认 MTU = **1280**
-- Flannel WireGuard 添加 ~60 bytes 头
-- 所以 Pod 实际可用 MTU = 1280 - 60 = **~1220**（甚至更少，取决于 IP/UDP 头叠加）
-- 标准以太网 MTU = 1500，TCP 通常使用 MSS = 1460
-- 应用层发 1460 bytes 的 TCP 数据包 → IP 层分片或 PMTUD 失败 → 连接黑洞
-
-**受影响流量：** 所有跨节点的 Pod 间 TCP 连接。大包（>1220 bytes）会被静默丢弃。
-
-**证据：** tailscale0 的 MTU 为 1280 是 Tailscale 默认值（在 `tailscale up` 时未指定 `--mtu` 的情况下）。Flannel WireGuard 封装头约 60 bytes。Pod 的 `subnet.env` 如无覆盖则默认 1500。
-
-### ⚠️ 根因 2：Mihomo TUN 模式拦截 K3s Pod 流量（GTR 节点独有）
-
-**问题机制：**
-
-Mihomo TUN 的 `route-exclude-address` 列表：
-```yaml
-route-exclude-address:
-  - 192.168.0.0/16
-  - 10.0.0.0/8
-  - 172.16.0.0/12
-  - 100.64.0.0/10
-  - "::/0"
-```
-
-- `10.0.0.0/8` 包括 `10.60.0.0/16`（K3s Pod CIDR）！
-- 这意味着 GTR 上的 K3s Pod 发送到其他节点 Pod（10.60.x.x）的流量**只会被路由排除，不进入 TUN**
-- 但 Tats 上排除路由 ≠ 不需要正确路由。排除只是说"不劫持到 TUN 接口"，但系统路由表必须正确指向 Flannel 的 WireGuard 接口
-- 如果 Flannel 的 WireGuard 路由不存在或错误，排除路由的 Pod CIDR 流量会走**默认路由** → 丢包
-
-**关键测试：** 在 GTR 上 `ip route show | grep 10.60` 查看 Flannel 子网路由是否正确指向 `flannel.wg` 接口。
-
-**潜在冲突：**
-- Tailscale 有自己的路由表（table 52）
-- Flannel 在 main 表中操作路由
-- Mihomo TUN 在 main 表中添加策略路由
-
-### ⚠️ 根因 3：Flannel WireGuard 在 /32 地址上的路由问题
-
-**问题机制：**
-
-- Flannel `wireguard-native` backend 需要在每个节点上建立到其他节点的 WireGuard peer
-- 每个 peer 的 Endpoint 是目标节点的 `node-ip`（Tailscale IP，如 `100.102.140.59`）
-- Tailscale IP 是 **/32 点对点地址**，不是标准可路由广播地址
-- Flannel WireGuard 需要发送 UDP 包到 `100.99.48.76:51820`，这个包必须被正确路由到 tailscale0
-- 如果 tailscale0 的路由优先级、策略或 nftables 规则干扰，WireGuard 握手会失败
-- Flannel WG peer 建立失败 → Pod 子网不通
-
-**验证命令（在各节点执行）：**
-```bash
-# 检查 Flannel WireGuard 接口
-ip link show flannel.wg 2>/dev/null || ip link show flannel.1 2>/dev/null
-
-# 检查 wireguard peer 状态
-wg show flannel.wg 2>/dev/null || echo "no flannel.wg"
-
-# 检查 flannel 子网路由
-ip route show | grep 10.60
-
-# 检查 tailscale 路由表
-ip route show table 52
-```
-
-### ⚠️ 根因 4：Flannel `net.bridge.bridge-nf-call-iptables=1` 对 WireGuard 接口的副作用
-
-- K3s prereq 设置了 `net.bridge.bridge-nf-call-iptables=1`
-- 这对 bridge 设备有用，但 WireGuard 接口**不是 bridge**
-- nftables/iptables 的 FORWARD 链中存在的 DOCKER 遗留规则（见 issue #008）可能仍然存在
-- GTR 上 Docker 已卸载，但 `nft` 规则中的 `DOCKER-FORWARD`、`FLANNEL-FWD` 等链可能仍有引用
-- 当 Pod 流量经过 FORWARD 链时，被跳转到 DOCKER 规则造成额外延迟或丢弃
-
-### ⚠️ 根因 5：GTR 旧 K3s server 残留 vs 新的 K3s agent
-
-**历史背景：**
-- 原拓扑：GTR = K3s server（已崩溃 crashloop，问题在 issue #007 分析）
-- 新拓扑：aliyun = K3s server, GTR = K3s agent
-- 迁移执行后，GTR 上的旧 `k3s` server service 需要被完全停止并清理
-
-**可能的问题：**
-- GTR 上旧 K3s server 的 `k3s-killall.sh` 未执行
-- 残留的 `flannel.1`（VXLAN 接口）与新的 `flannel.wg`（WireGuard 接口）冲突
-- 残留的 iptables/nftables 规则（FLANNEL-POSTRTG, FLANNEL-FWD）与新的 Flannel 规则冲突
-- `/var/lib/rancher/k3s/server/` 中的数据未清理
-
-### ⚠️ 根因 6：Cluster DNS (10.61.0.10) 与 Mihomo DNS (100.121.0.67:53) 的交互
-
-- GTR 上 Mihomo DNS 监听 `100.121.0.67:53`，enhanced-mode: `redir-host`
-- K3s Cluster DNS 在 `10.61.0.10`，是 CoreDNS Service 的 Cluster IP
-- 当 GTR 上的 Pod 解析 `svc.cluster.local` 时，DNS 请求到 `10.61.0.10` → CoreDNS
-- CoreDNS 需要解析外部域名时，会向节点 `/etc/resolv.conf` 指定的上游 DNS 查询
-- 如果 `resolv.conf` 被 Mihomo TUN 的 DNS hijack 劫持 → CoreDNS 的外部查询可能被 Mihomo 重定向
-- 虽然 10.0.0.0/8 在 route-exclude 中，但 DNS 是应用层（UDP 53），可能被 Mihomo 的 `dns-hijack: any:53` 捕获
-
----
-
-## 三、建议的故障排查步骤
-
-### 步骤 1：验证集群基本健康
-
-在 aliyun server 上执行（SSH 可通过 CI 或直接通过 Tailscale）：
-
-```bash
-# 节点状态
-k3s kubectl get nodes -o wide
-
-# Pod 状态（检查 kube-system 核心组件）
-k3s kubectl get pods -n kube-system -o wide
-
-# Flannel Pod 日志
-k3s kubectl -n kube-system logs -l k8s-app=flannel --tail=50
-```
-
-### 步骤 2：验证 Flannel WireGuard 隧道
-
-**在 aliyun 上：**
-```bash
-# 确认 Flannel WG 接口存在
-ip link show flannel.wg
-wg show flannel.wg
-
-# 检查 peer 列表（应该有 gtr 和 tencent 的 peer）
-# 检查每个 peer 的 endpoint、allowed-ips、latest-handshake
-
-# 检查路由
-ip route show | grep 10.60
-
-# MTU 确认
-ip link show flannel.wg | grep mtu
-```
-
-**在 gtr 和 tencent 上重复同样的检查。**
-
-### 步骤 3：MTU 测试
-
-```bash
-# 在 aliyun 部署一个测试 Pod
-k3s kubectl run test-pod --image=alpine -- sleep 3600
-
-# 从不同节点测试 MTU（在 aliyun / gtr / tencent 上分别部署并互相 ping）
-k3s kubectl exec -it test-pod -- ping -c 3 -M do -s 1200 <other-pod-ip>
-k3s kubectl exec -it test-pod -- ping -c 3 -M do -s 1400 <other-pod-ip>
-k3s kubectl exec -it test-pod -- ping -c 3 -M do -s 1472 <other-pod-ip>
-
-# -M do = DF flag set, -s = payload size
-# 如果 1472 失败但 1200 成功，证明 MTU 问题
-```
-
-### 步骤 4：nftables/iptables 规则检查
-
-**特别是 GTR 节点（曾运行 Docker，可能有残留规则）：**
-```bash
-# 检查 nat 表
-nft list table ip nat
-
-# 检查 filter 表 FORWARD 链
-nft list chain ip filter FORWARD
-
-# 检查是否有 FLANNEL 链和 DOCKER 链
-nft list table ip filter | grep -E "chain (FLANNEL|DOCKER)"
-
-# 检查 conntrack 对 WireGuard 流量的处理
-conntrack -L | grep 51820
-```
-
-### 步骤 5：检查 GTR 旧 K3s server 残留
-
-```bash
-# 检查是否还有 k3s server 进程
-systemctl status k3s
-ps aux | grep k3s
-
-# 检查残留接口
-ip link show flannel.1 2>/dev/null && echo "OLD VXLAN interface still exists!"
-ip link show cni0 2>/dev/null
-
-# 检查残留数据
-ls -la /var/lib/rancher/k3s/server/ 2>/dev/null
-
-# check current k3s-agent
-systemctl status k3s-agent
-journalctl -u k3s-agent --no-pager -n 50
-```
-
-### 步骤 6：Flannel WireGuard 端口可达性
-
-```bash
-# Flannel WG 默认端口是 51820（UDP）
-# 测试节点间 51820 端口是否可达（通过 Tailscale IP）
-# 在 aliyun 上：
-nc -zu -w 3 100.99.48.76 51820
-nc -zu -w 3 100.121.0.67 51820
-
-# 在 gtr 上：
-nc -zu -w 3 100.102.140.59 51820
-nc -zu -w 3 100.99.48.76 51820
-
-# 在 tencent 上：
-nc -zu -w 3 100.102.140.59 51820
-nc -zu -w 3 100.121.0.67 51820
-```
-
-> 如果 `nc` 不可用，可用 `nmap` 或查看 `wg show` 的 `latest-handshake` 时间戳。
-
----
-
-## 四、修复方案候选
-
-### 方案 A：Flannel 改用 `host-gw` backend（推荐优先尝试）
+### 2. Key Configuration Variables (from `group_vars/all/public.yml`)
 
 ```yaml
-# group_vars/all/public.yml
-k3s_flannel_backend: host-gw
+# --- Envoy ---
+envoy_version: v1.37.0
+envoy_admin_port: 9901
+envoy_listener_port: 443
+envoy_http_listener_enabled: true
+envoy_http_listener_port: 80
+envoy_log_path: /var/log/envoy
+envoy_log_rotate: 7
+envoy_dynamic_config_dir: /etc/envoy/dynamic_config
+envoy_tls_cert_dir: /etc/envoy/certs
+envoy_domain_routes:          # <-- Routes defined per-node
+  - name: node_exporter_metrics
+    mode: http_plaintext
+    path_prefix: /metrics
+    cluster: node_exporter
+  - name: envoy_admin_metrics
+    mode: http_plaintext
+    path_prefix: /stats/prometheus
+    cluster: envoy_admin
+envoy_additional_clusters: [] # <-- G/Observability clusters (grafana, vm, vl) NOT defined here!
+
+# --- Vector ---
+edge_vector_enabled: true
+vector_version: 0.53.0
+edge_vector_sink_type: local_file   # "victorialogs" on non-GTR edges
+victorialogs_host: gtr.tail414c32.ts.net
+victorialogs_port: 8429
+victoriametrics_host: gtr.tail414c32.ts.net
+victoriametrics_port: 8428
+victoriatraces_host: gtr.tail414c32.ts.net
+victoriatraces_http_port: 9428
+
+# --- VM Scrape ---
+edge_vm_scrape_config_path: /usr/local/victoriametrics/victoriametrics_sd.yaml
+edge_proxy_vm_scrape_jobs:    # <-- Edge proxy targets
+  - job_name: edge_proxy_aliyun
+    target: 47.120.46.128:80
+  - job_name: edge_proxy_remote_proxy
+    target: 66.154.100.187:80
+  - job_name: edge_proxy_tencent
+    target: 129.211.12.63:80
+
+# --- K3s ---
+k3s_server_url: https://100.100.99.70:6443
+k3s_flannel_iface: tailscale0
+k3s_containerd_http_proxy: "http://100.121.0.67:7890"
 ```
 
-- **原理：** 所有节点通过 Tailscale 三层可达，`host-gw` 只需添加静态路由，无需额外封装
-- **优点：** 零封装开销，无 MTU 问题，无需 WireGuard 握手
-- **缺点：** 无加密（但已有一层 Tailscale 加密），不支持跨网段自动路由
-- **适用性：** 本次拓扑中所有节点都在 Tailscale 同一子网，完全满足条件
+### 3. Envoy Routing to Observability (WHAT'S MISSING)
 
-### 方案 B：Flannel 显式限制 MTU
+The Envoy CDS template (`cds.yaml.j2`) **only** generates clusters from `envoy_additional_clusters` + hardcoded `shadow_tls_server`, `node_exporter`, `envoy_admin`. There is **no variable-driven cluster** for Grafana, VictoriaMetrics, or VictoriaLogs.
 
-保留 `wireguard-native` 但显式设置 Flannel MTU：
+On GTR specifically, the Envoy config on disk is static (not generated by this Ansible) — the runbook shows hardcoded clusters:
+- `grafana_service` → `127.0.0.1:3000`
+- `victoriametrics_service` → `127.0.0.1:8428`
+- `logs_service` → `127.0.0.1:8429`
+- `web_service` → `httpbin.org:80`
 
-```yaml
-# Flannel 配置中加 MTU
-flannel-backend: wireguard-native
-# 或在 K3s 启动参数中加
---flannel-backend=wireguard-native --flannel-mtu=1200
+These clusters are **not represented in any Ansible template or variable**. They are manually maintained on GTR's `/etc/envoy/dynamic_config/cds.yaml`.
+
+### 4. Data Flow Summary
+
+```
+Edge Node (aliyun/tencent/remote_proxy)
+  Envoy :80/:443 → logs to /var/log/envoy/access.log
+  Vector → reads access.log + scrapes :9901/stats/prometheus + :9100/metrics
+    → ships logs to {{ victorialogs_host }}:{{ victorialogs_port }}/insert/elasticsearch/
+    → ships metrics to {{ victoriametrics_host }}:{{ victoriametrics_port }}/api/v1/write
+    → ships traces to {{ victoriatraces_host }}:{{ victoriatraces_http_port }}/insert/opentelemetry/v1/traces
+
+GTR Core
+  Envoy :443 → routes to Grafana :3000, VM :8428, VL :8429
+  VictoriaMetrics scrapes itself + node_exporter + edge_proxy targets
+  VictoriaLogs receives from Vector (edge + local network-monitor + mihomo)
+  VictoriaTraces receives from edge OTLP
+  Grafana → reads VM :8428 (data source) + VL :8429 (plugin)
+  Network Monitor → cron script → through Mihomo :7890 → JSON logs → Vector → VL
+  Mihomo Metrics → shell script → Mihomo API :9090 → push to VM :8428
+  Mihomo Logs → Vector reads journald → VL :8429
 ```
 
-> K3s 支持 `--flannel-mtu` 参数，但需要在 installer 脚本中传递到 K3s exec 参数。
+### 5. Interdependencies
 
-### 方案 C：将 Flannel backend 改为 VXLAN（非 tailscale0）
-
-```yaml
-k3s_flannel_backend: vxlan
-# 需要指定正确的接口（tailscale0 在 issue #007 被证明有 crashloop 问题）
-# 但用 vxlan 不加 flannel-iface 的话，Flannel 会自动选 eth0（公网 IP），Pod 流量走公网明文
-```
-
-### 方案 D：Tailscale subnet routes + 禁用 Flannel
-
-```yaml
-k3s_disable_network_policy: true
-# 在 Tailscale 上为各节点设置 subnet routes
-# 但需要大幅修改架构，不推荐
-```
-
-### 推荐优先级
-
-1. **先执行故障排查步骤 1-6**，确认确切根因
-2. 如果确定是 **MTU 断裂**（步骤 3 确认）：采用**方案 A（host-gw）**
-3. 如果确定是 **WireGuard 握手失败**（步骤 6 确认）：检查防火墙规则，采用**方案 A（host-gw）**
-4. 如果确定是 **GTR 旧 server 残留**：执行 issue #007 中的清理步骤
-5. 如果确定是 **Mihomo TUN 拦截**：在 Mihomo config 中明确添加 `10.60.0.0/16` 到 `route-exclude-address`
+| Dependency | Direction | What breaks |
+|-----------|-----------|-------------|
+| Envoy → Grafana/VM/VL | GTR Envoy → localhost | All dashboard/metrics/log access via :443 breaks |
+| Vector → VM/VL/VT | Every node → GTR Tailscale | Metrics/logs/traces stop flowing if Tailscale breaks or GTR IP changes |
+| Grafana → VM | Grafana → localhost:8428 | Dashboards have no data |
+| Grafana → VL | Grafana → localhost:8429 | Logs dashboards have no data |
+| VictoriaMetrics scrape → edge targets | GTR → public IPs | Edge proxy metrics missing |
+| Network Monitor → Mihomo | Script → 127.0.0.1:7890 | Routing validation stops |
+| Mihomo → remote_proxy | GTR → 66.154.100.187:443 | No outbound proxy (ShadowTLS) |
+| Mihomo metrics → VM | Script → 127.0.0.1:8428 | Mihomo dashboards blank |
+| Mihomo logs → VL | Vector → 127.0.0.1:8429 | Mihomo logs not searchable |
 
 ---
 
-## 五、关键文件索引
+## Architecture
 
-| 文件路径 | 行号 | 内容相关 |
-|----------|------|---------|
-| `edge/ansible/group_vars/all/public.yml` | L112-132 | K3s 全局变量（CIDR, flannel-backend, containerd proxy） |
-| `edge/ansible/group_vars/all/public.yml` | L117 | `k3s_flannel_backend: wireguard-native` |
-| `edge/ansible/host_vars/aliyun/public.yml` | L6-9 | aliyun server vars: `k3s_server_tailscale_ip`, `k3s_server_tls_sans` |
-| `edge/ansible/host_vars/aliyun/public.yml` | L12-15 | aliyun 的 containerd registry mirrors（阿里云镜像） |
-| `edge/ansible/host_vars/gtr/public.yml` | L4-6 | GTR 使用 localhost proxy（`127.0.0.1:7890`） |
-| `edge/ansible/roles/k3s-server/templates/config.yaml.j2` | L1-16 | Server config: `flannel-backend`, `cluster-cidr`, `service-cidr`, `advertise-address`, `node-ip` |
-| `edge/ansible/roles/k3s-server/tasks/main.yml` | L3-9 | 断言 `k3s_cluster_token` |
-| `edge/ansible/roles/k3s-server/tasks/main.yml` | L12-30 | 读取 Tailscale IP, 渲染 config.yaml + registries.yaml |
-| `edge/ansible/roles/k3s-agent/templates/config.yaml.j2` | L1-4 | Agent config: `server: https://100.102.140.59:6443`, `node-ip` |
-| `edge/ansible/roles/k3s-agent/tasks/main.yml` | L17-20 | Agent 通过 `tailscale ip -4` 获取 node-ip |
-| `edge/ansible/roles/k3s-prereq/defaults/main.yml` | L16-20 | sysctl: `net.ipv4.ip_forward=1`, `bridge-nf-call-iptables=1` |
-| `edge/ansible/roles/k3s-prereq/defaults/main.yml` | L10-12 | 内核模块: `wireguard`, `overlay`, `br_netfilter` |
-| `edge/ansible/inventory-edge.ini` | L1-12 | 所有节点经 Tailscale IP 连接 |
-| `edge/ansible/deploy-gtr-k3s-agent.yml` | L3 | **只部署到** `gtr_core:edge_tencent`，不含 `edge_remote_proxy` |
-| `mihomo/ansible/group_vars/all/public.yml` | L40 | `mihomo_dns_listen: 100.121.0.67:53` |
-| `mihomo/ansible/group_vars/all/public.yml` | L41 | `mihomo_enhanced_mode: redir-host` |
-| `mihomo/ansible/roles/mihomo/templates/config.yaml.j2` | L30-34 | `route-exclude-address` 含 `10.0.0.0/8`（涵盖 `10.60.0.0/16`）|
-| `mihomo/ansible/roles/mihomo/templates/config.yaml.j2` | L27 | `dns-hijack: any:53` |
-| `docs/issues/007-k3s-flannel-tailscale-crashloop.md` | 全文 | 旧 crashloop 分析（flannel-iface: tailscale0 导致 kube-proxy 崩溃） |
-| `docs/issues/008-docker-nftables-conflict-analysis.md` | 全文 | Docker nftables 残留规则分析 |
+### Physical Topology (Observability)
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    GTR (192.168.31.59)                  │
+│                                                          │
+│  ┌─────────┐     ┌──────────────┐    ┌───────────────┐  │
+│  │ Grafana │◄────│   Envoy :443 │◄───│  Tailscale    │  │
+│  │ :3000   │     │   Admin:9901 │    │  100.121.0.67 │  │
+│  └────┬────┘     └──────┬───────┘    └───────────────┘  │
+│       │                 │                                │
+│       ▼                 ▼                                │
+│  ┌─────────┐     ┌──────────────┐                       │
+│  │  VM     │     │   VL        │                       │
+│  │ :8428   │     │ :8429       │                       │
+│  └────┬────┘     └──────┬──────┘                       │
+│       │                 │                               │
+│       ▼                 ▼                               │
+│  ┌─────────┐     ┌──────────────┐                       │
+│  │  VT     │     │   Mihomo     │  Network Mon.         │
+│  │ :9428   │     │ :7890/:9090  │  cron→:7890→VL        │
+│  └─────────┘     └──────────────┘                       │
+│                                                          │
+└──────────────────────────┬──────────────────────────────┘
+                           │ Tailscale (tail414c32.ts.net)
+     ┌─────────────────────┼─────────────────────┐
+     ▼                     ▼                     ▼
+┌──────────────┐  ┌──────────────┐  ┌──────────────────┐
+│   Aliyun     │  │   Tencent    │  │  remote_proxy     │
+│   Envoy :80  │  │   Envoy :80  │  │  Envoy :80/:443   │
+│   Vector→VL  │  │   Vector→VL  │  │  Vector→VL        │
+│               │  │              │  │  Tunnel Servers   │
+└──────────────┘  └──────────────┘  └──────────────────┘
+```
+
+### ArgoCD App-of-Apps
+
+There is **no umbrella Application**. The `platform/applications/` directory contains two standalone Application manifests (`sealed-secrets.yaml`, `tailscale-operator.yaml`). These are applied manually or via CI — not aggregated by a root App. There is no `applicationset.yaml` or umbrella `argocd-apps.yaml`.
 
 ---
 
-## 六、已知约束和注意事项
+## Start Here
 
-1. **`remote_proxy` 不是 K3s 节点** — 如果有 Pod 需要调度到 remote_proxy，需要修改 `deploy-gtr-k3s-agent.yml` 增加 `edge_remote_proxy` 组，并添加对应 host_vars。
+Open **`edge/ansible/group_vars/all/public.yml`** — it is the single source of truth for all edge and observability configuration variables. Every port, host, version, and feature flag is set here.
 
-2. **Flannel 从 issue #007 的 `flannel-iface: tailscale0` 改为现在的 `wireguard-native` 无 `flannel-iface`** — 不再使用 tailscale0 作为 Flannel 接口，但 `node-ip` 仍为 Tailscale IP，Flannel WG 隧道建在 Tailscale IP 之上。
+---
 
-3. **K3s 禁用了 `servicelb` 和 `traefik`** — LoadBalancer Service 和 Ingress Controller 都不可用。服务暴露走 Tailscale Operator（已部署但 SealedSecret OAuth 可能未就位）。
+## What Would Break If a Service Moved to a Different IP/Port
 
-4. **GTR 曾运行旧 K3s server（已 crashloop）** — 迁移到 aliyun server 后，GTR 上的旧 k3s server 需要完全清理。但 deploy playbook 的 idempotency 检查（`systemctl is-active k3s-agent`）只在已有 agent 运行时跳过安装，不会主动清理旧 server 残留。
+### Hardcoded References (Will break immediately)
 
-5. **Mihomo TUN 运行在 GTR 上** — 它劫持所有非排除地址的流量。K3s Pod CIDR `10.60.0.0/16` 被 `10.0.0.0/8` 排除规则覆盖，所以不被 TUN 劫持。但 K3s Service CIDR `10.61.0.0/16` **也在** `10.0.0.0/8` 范围内，同样被排除。所以 K3s 内部流量理论上不会被 Mihomo 劫持，但需要验证路由表正确。
+| What's hardcoded | Where | Impact |
+|-----------------|-------|--------|
+| Grafana → `http://localhost:8428` | Grafana data source config (provisioning, manual) | VM data source fails |
+| Grafana → `http://localhost:8429` | Grafana VictoriaLogs plugin data source | VL data source fails |
+| GTR Envoy → `127.0.0.1:3000/8428/8429` | `/etc/envoy/dynamic_config/cds.yaml` (manual, not templated) | All proxy routes fail |
+| Vector on GTR → `http://localhost:8429` | `network-monitor/vector.yaml`, `mihomo/monitoring/` | Log shipping breaks on GTR-local Vector |
+| Mihomo metrics → `http://127.0.0.1:8428` | `mihomo-metrics.sh.j2` | Mihomo dashboard metrics stop |
+| Network Monitor → `127.0.0.1:7890` | `network-monitor.sh` | Routing validation fails if Mihomo port changes |
+| Vector (GTR) scrape → `127.0.0.1:9901` | `edge/ansible/roles/edge-vector/templates/vector.yaml.j2` (line 13) | Envoy metrics not collected locally |
 
-6. **containerd image pull proxy** 已配置 — 非 GTR 节点通过 `gtr.tail414c32.ts.net:7890`（Mihomo HTTP proxy）拉取镜像，GTR 用 `127.0.0.1:7890`，aliyun 用阿里云镜像。这不应影响数据面网络。
+### Configurable References (Will work with variable change)
 
-7. **Docker 已于 2026-06-07 从 GTR 卸载** — 但 nftables 中的 DOCKER 遗留规则可能仍然存在（`DOCKER-FORWARD`, `DOCKER-CT` 等链），见 issue #008。这些规则可能干扰 Flannel 的 FORWARD 处理。
+| What's variable-bound | Variable | Nodes affected |
+|----------------------|----------|---------------|
+| Edge Vector sinks → `victorialogs_host:port` | `victorialogs_host`, `victorialogs_port` | All edge nodes |
+| Edge Vector → `victoriametrics_host:port` | `victoriametrics_host`, `victoriametrics_port` | All edge nodes |
+| Edge Vector → `victoriatraces_host:port` | `victoriatraces_host`, `victoriatraces_http_port` | All edge nodes |
+| GTR Envoy CDS clusters (node_exporter, admin) | `node_exporter_port`, `envoy_admin_port` | All edge nodes |
+| VM scrape targets | `edge_proxy_vm_scrape_jobs` | GTR VM |
+| Mihomo proxies → `shadowtls_server:port` | `shadowtls_server`, `shadowtls_port` | All Mihomo nodes |
+
+### Critical: Tailscale MagicDNS
+
+Most cross-node references use `gtr.tail414c32.ts.net` (Tailscale MagicDNS). If Tailscale IPs change or MagicDNS breaks, all remote Vector shipping stops. The actual Tailscale IP of GTR is `100.121.0.67`, which is also used directly in:
+- `mihomo_dns_listen: 100.121.0.67:53`
+- `k3s_containerd_http_proxy: http://100.121.0.67:7890`
+- Mihomo rules matching Tailscale CIDR `100.64.0.0/10`
+
+### Observability from non-GTR machines
+
+If you want to run Grafana dashboards from a machine that ISN'T GTR, the following ALL route through Envoy on GTR `:443`:
+- Grafana UI
+- VictoriaMetrics queries
+- VictoriaLogs queries
+- VictoriaTraces queries (via Jaeger API at `http://gtr:9428/select/jaeger`)
+
+These are NOT exposed through any other entry point. The ArgoCD services (e.g., `argocd-server`) are exposed via Tailscale Operator with `ProxyClass gtr-only`, also pinning to GTR.
+
+---
+
+## Constraints & Risks
+
+1. **GTR is a single point of failure** for the entire observability stack and proxy routing.
+2. **Envoy observability clusters are not in Ansible** — Grafana, VM, VL clusters on GTR are hand-maintained in `/etc/envoy/dynamic_config/cds.yaml`. Any redeploy of GTR Envoy from this repo will lose those clusters unless `envoy_additional_clusters` is populated.
+3. **VictoriaMetrics scrape config is managed in two places**: the initial config is deployed by the victoriametrics install playbook, then `deploy-edge-victoriametrics-scrape.yml` merges edge-proxy jobs into it. This is brittle if the initial config changes structure.
+4. **Vector on GTR reads from multiple Vector config files** — `vector.yaml`, `mihomo.yaml`, and possibly others. The systemd service only references `--config /etc/vector/vector.yaml`. Additional configs must either be included or Vector must be restarted with an expanded `--config` argument.
+5. **Network-monitor Vector config** (`network-monitor/vector.yaml`) copies over `/etc/vector/vector.yaml`, potentially overwriting the edge Vector config on GTR. This is a conflict if both the edge role and network-monitor ansible run on GTR.
+6. **No ArgoCD umbrella Application** — `platform/applications/` contains two independent Application manifests with no root App-of-Apps. There's no single `ApplicationSet` or umbrella `Application` that aggregates them.
+7. **Tailscale ACLs are documented but not in repo** — The aliyun-telemetry doc describes ACL tags (`tag:aliyun-envoy`, `tag:gtr-monitoring`) that must be configured in Tailscale admin console. These are not version-controlled.

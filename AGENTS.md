@@ -87,7 +87,7 @@ ansible-playbook -i inventory-edge.ini deploy-gtr-k3s-agent.yml
 
 # === Platform Operators ===
 ansible-playbook -i inventory-edge.ini deploy-platform-argocd.yml
-ansible-playbook -i inventory-edge.ini deploy-platform-sealed-secrets.yml
+ansible-playbook -i inventory-edge.ini bootstrap-platform-sealed-secrets-key.yml
 ansible-playbook -i inventory-edge.ini deploy-platform-tailscale-operator.yml
 
 # === 验证 ===

@@ -257,7 +257,15 @@ def classify_path(path: str, plan: DeployPlan) -> None:
         plan.run_platform_argocd = True
         return
 
-    if path in {"edge/ansible/deploy-platform-sealed-secrets.yml", "edge/ansible/verify-platform-sealed-secrets.yml"}:
+    if path in {
+        "edge/ansible/bootstrap-platform-sealed-secrets-key.yml",
+        "edge/ansible/verify-platform-sealed-secrets.yml",
+    }:
+        plan.run_k3s_platform = True
+        plan.run_platform_sealed_secrets = True
+        return
+
+    if path == "platform/applications/sealed-secrets.yaml":
         plan.run_k3s_platform = True
         plan.run_platform_sealed_secrets = True
         return

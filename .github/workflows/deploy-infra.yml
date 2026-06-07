@@ -402,7 +402,7 @@ jobs:
         working-directory: edge/ansible
         run: ansible-playbook -i inventory-edge.ini deploy-platform-tailscale-operator.yml -v
 
-      - name: Manual: Back up Sealed Secrets private key to vault
+      - name: "Manual: Back up Sealed Secrets private key to vault"
         run: |
           echo "=== Sealed Secrets key backup (manual) ==="
           echo "The deploy playbook exports the private key and then cleans it up."

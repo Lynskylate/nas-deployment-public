@@ -95,7 +95,7 @@ Client Secret: <REDACTED - see nas-deployment-vault>
 |------|------|------|
 | `argocd_admin_password` | Argo CD 安装后自动生成 | Argo CD Web UI/CLI 登录 |
 | `argocd_repo_ssh_key` | GitHub Deploy Key | Argo CD 拉取应用仓库 |
-| `tailscale_operator_oauth_client_id` | Tailscale Admin Console | ✅ `kN2Q6wMy1Y11CNTRL`（已存入 vault） |
+| `tailscale_operator_oauth_client_id` | Tailscale Admin Console | ✅ `<REDACTED - see nas-deployment-vault>`（已存入 vault） |
 | `tailscale_operator_oauth_client_secret` | Tailscale Admin Console | ✅ 已存入 vault |
 | `sealed_secrets_private_key_backup` | 安装时从集群导出 | 灾难恢复 |
 

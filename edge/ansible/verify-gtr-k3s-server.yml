@@ -2,6 +2,7 @@
 - name: Verify K3s server on aliyun
   hosts: edge_aliyun
   become: true
+  gather_facts: false
 
   tasks:
     - name: Check k3s service state

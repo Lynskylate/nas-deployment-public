@@ -2,6 +2,7 @@
 - name: Deploy K3s agents on GTR and tencent
   hosts: gtr_core:edge_tencent
   become: true
+  gather_facts: false
 
   roles:
     - role: k3s-prereq

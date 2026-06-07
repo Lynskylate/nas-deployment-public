@@ -1,0 +1,39 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: victoria-metrics-operator
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  project: default
+  source:
+    repoURL: https://victoriametrics.github.io/helm-charts
+    chart: victoria-metrics-operator
+    targetRevision: 0.x
+    helm:
+      values: |
+        crds:
+          enabled: true
+        operator:
+          # Watch Prometheus Operator CRDs (ServiceMonitor, PodMonitor) and auto-convert
+          disable_prometheus_converter: false
+          # Add ArgoCD ignore-diff annotations on converted resources
+          prometheus_converter_add_argocd_ignore_annotations: true
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

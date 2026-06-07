@@ -1,0 +1,138 @@
+# Persistent Volumes for observability stack
+# These PVs point to the existing bare-metal data directories on the GTR node,
+# allowing a zero-copy migration: stop bare-metal services → deploy K8s pods → same data.
+#
+# Prerequisites:
+#   - Stop bare-metal victoriametrics/victorialogs/victoriatraces services first
+#   - Ensure directories exist: /var/lib/victoria{metrics,logs,traces}/data
+#   - Fix permissions: chown -R 65534:65534 /var/lib/victoria*/data
+#     (containers run as UID 65534/nobody)
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-victoriametrics
+  labels:
+    app: victoriametrics
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: observability-hostpath
+  hostPath:
+    path: /var/lib/victoriametrics/data
+    type: DirectoryOrCreate
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - gtr
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: victoriametrics-data
+  namespace: monitoring
+  labels:
+    app: victoriametrics
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: observability-hostpath
+  resources:
+    requests:
+      storage: 50Gi
+  selector:
+    matchLabels:
+      app: victoriametrics
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-victorialogs
+  labels:
+    app: victorialogs
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: observability-hostpath
+  hostPath:
+    path: /var/lib/victorialogs/data
+    type: DirectoryOrCreate
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - gtr
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: victorialogs-data
+  namespace: monitoring
+  labels:
+    app: victorialogs
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: observability-hostpath
+  resources:
+    requests:
+      storage: 50Gi
+  selector:
+    matchLabels:
+      app: victorialogs
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-victoriatraces
+  labels:
+    app: victoriatraces
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: observability-hostpath
+  hostPath:
+    path: /var/lib/victoriatraces/data
+    type: DirectoryOrCreate
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - gtr
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: victoriatraces-data
+  namespace: monitoring
+  labels:
+    app: victoriatraces
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: observability-hostpath
+  resources:
+    requests:
+      storage: 50Gi
+  selector:
+    matchLabels:
+      app: victoriatraces

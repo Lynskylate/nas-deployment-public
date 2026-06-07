@@ -1,0 +1,43 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: victorialogs
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://victoriametrics.github.io/helm-charts
+    chart: victoria-logs-single
+    targetRevision: 0.x
+    helm:
+      values: |
+        persistentVolume:
+          enabled: true
+          existingClaim: victorialogs-data
+        extraArgs:
+          envflag.enable: "true"
+          envflag.prefix: VM_
+          loggerFormat: json
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: "1"
+            memory: 512Mi
+        nodeSelector:
+          kubernetes.io/hostname: gtr
+        service:
+          annotations:
+            tailscale.com/expose: "true"
+            tailscale.com/proxy-class: gtr-only
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

@@ -1,13 +1,14 @@
-*.runtime.yml
-.vault/
-*.decrypted
-*.dec
-*.agekey
-*.agekey.pub
-.env.decrypted
-edge/pki/
 
 # Local planning docs and agent scratch files
-docs/plans/
+*.agekey
+*.agekey.pub
+*.dec
+*.decrypted
+*.runtime.yml
+.env.decrypted
+.vault/
 docs/issues/
+docs/plans/
+edge/pki/
 progress.md
+scout-ansible.md

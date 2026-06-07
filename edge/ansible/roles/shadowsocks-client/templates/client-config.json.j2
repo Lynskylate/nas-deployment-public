@@ -1,0 +1,10 @@
+{
+    "server": "127.0.0.1",
+    "server_port": {{ shadowtls_client_listen_port }},
+    "password": "{{ shadowsocks_password }}",
+    "timeout": {{ shadowsocks_timeout }},
+    "method": "{{ shadowsocks_method }}",
+    "local_address": "{{ shadowsocks_client_local_address }}",
+    "local_port": {{ shadowsocks_client_port }},
+    "fast_open": true
+}

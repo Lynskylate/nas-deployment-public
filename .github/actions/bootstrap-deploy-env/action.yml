@@ -63,7 +63,6 @@ runs:
           edge/ansible/host_vars/gtr \
           mihomo/ansible/group_vars/all \
           mihomo/ansible/group_vars/aliyun \
-          shadowsocks-shadowtls/ansible/group_vars/all \
           grafana
 
         age_key_file="$RUNNER_TEMP/sops-age/keys.txt"
@@ -77,14 +76,13 @@ runs:
         sops --decrypt .vault/repo/ansible/edge/host_vars/gtr/secret.sops.yml > edge/ansible/host_vars/gtr/secret.runtime.yml
         sops --decrypt .vault/repo/ansible/mihomo/group_vars/all/secret.sops.yml > mihomo/ansible/group_vars/all/secret.runtime.yml
         sops --decrypt .vault/repo/ansible/mihomo/group_vars/aliyun/secret.sops.yml > mihomo/ansible/group_vars/aliyun/secret.runtime.yml
-        sops --decrypt .vault/repo/ansible/shadowsocks-shadowtls/group_vars/all/secret.sops.yml > shadowsocks-shadowtls/ansible/group_vars/all/secret.runtime.yml
+
         sops --decrypt .vault/repo/grafana/secret.sops.yml > grafana/secret.runtime.yml
         chmod 600 \
           edge/ansible/group_vars/all/secret.runtime.yml \
           edge/ansible/host_vars/gtr/secret.runtime.yml \
           mihomo/ansible/group_vars/all/secret.runtime.yml \
           mihomo/ansible/group_vars/aliyun/secret.runtime.yml \
-          shadowsocks-shadowtls/ansible/group_vars/all/secret.runtime.yml \
           grafana/secret.runtime.yml
 
         BOOTSTRAP_FILE="$bootstrap_file" GITHUB_OUTPUT="$GITHUB_OUTPUT" python3 - <<'PY'

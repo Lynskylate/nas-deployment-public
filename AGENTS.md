@@ -18,13 +18,13 @@
 
 ```
 nas-deployment-public/
+<<<<<<< HEAD
 ├── edge/ansible/             # Ansible playbooks, roles, host_vars（核心）
 ├── platform/                 # K3s 内平台组件（ArgoCD GitOps source）
 │   ├── applications/         # ArgoCD Application CRDs
 │   ├── helm-values/
 │   └── resources/            # 直接应用的 K8s 资源（如 ProxyClass）
 ├── k3s/                      # K3s 平台文档
-├── shadowsocks-shadowtls/    # 旧 SS+Shadow-TLS（正被 edge/ 取代）
 ├── mihomo/                   # Mihomo 代理客户端（Ansible）
 ├── cigbutt/                  # 量化分析 CLI（Python, hatchling）
 ├── victoriatraces/           # VictoriaTraces 分布式追踪
@@ -109,21 +109,17 @@ gh workflow run deploy-infra.yml --ref main -f target=all
 
 ## Gotchas
 
-1. **Roles path 复用:** `edge/ansible/ansible.cfg` 的 `roles_path` 包含 `../../shadowsocks-shadowtls/ansible/roles`。移动/重命名该目录会中断 edge 部署。
+1. **`remote_proxy` 不是 K3s 节点:** 不要将其加入 K3s agent 组。
 
-2. **Inventory IP 漂移:** `shadowsocks-shadowtls/ansible/inventory.ini` 引用旧 IP `142.171.205.19`，`edge/ansible/inventory-edge.ini` 使用 `66.154.100.187`。edge inventory 是当前版本。
+2. **Tunnel client 已从 GTR 移除:** Mihomo 内置 shadow-tls SIP003 处理所有代理流量。
 
-3. **`remote_proxy` 不是 K3s 节点:** 不要将其加入 K3s agent 组。
+3. **K3s 禁用了 servicelb + traefik:** 服务暴露走 Tailscale Operator。
 
-4. **Tunnel client 已从 GTR 移除:** Mihomo 内置 shadow-tls SIP003 处理所有代理流量。
+4. **Tailscale proxy 调度:** 用 `ProxyClass gtr-only` 强制到 GTR（tencent 有 WireGuard TCP 阻断）。
 
-5. **K3s 禁用了 servicelb + traefik:** 服务暴露走 Tailscale Operator。
+5. **YAML name 冒号陷阱:** GitHub Actions 的 `name:` 值含 `: ` 必须加引号（如 `name: "Manual: backup"`），否则 YAML parser 误解析。
 
-6. **Tailscale proxy 调度:** 用 `ProxyClass gtr-only` 强制到 GTR（tencent 有 WireGuard TCP 阻断）。
-
-7. **YAML name 冒号陷阱:** GitHub Actions 的 `name:` 值含 `: ` 必须加引号（如 `name: "Manual: backup"`），否则 YAML parser 误解析。
-
-8. **Cigbutt:** Python CLI 量化分析，位于 `cigbutt/`。详见 `cigbutt/README.md`。
+6. **Cigbutt:** Python CLI 量化分析，位于 `cigbutt/`。详见 `cigbutt/README.md`。
 
 ## 文档索引
 
@@ -134,4 +130,4 @@ gh workflow run deploy-infra.yml --ref main -f target=all
 | K3s 平台 CI 部署 | [`docs/deployment/k3s-platform-ci-deployment-guide.md`](docs/deployment/k3s-platform-ci-deployment-guide.md) |
 | K3s 平台概述 | [`k3s/README.md`](k3s/README.md) |
 | Vault 仓库 | `nas-deployment-vault/README.md`（私有仓库） |
-| 排错文档 | [`docs/troubleshooting/`](docs/troubleshooting/) |
+| 排错文档 | [`docs/troubleshooting/`](docs/troubleshooting/)

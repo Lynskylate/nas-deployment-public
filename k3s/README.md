@@ -52,3 +52,9 @@ ArgoCD UI: `https://argocd-argocd-server.tail414c32.ts.net`
 | `../edge/ansible/roles/argocd/` | ArgoCD bootstrap (App-of-Apps) |
 | `../platform/` | K3s platform manifests (ArgoCD GitOps source) |
 | `../.github/workflows/deploy-infra.yml` | CI pipeline |
+
+## Boundaries
+
+- `nas-deployment` owns host baseline, K3s, Argo bootstrap, platform operators, and shared platform services.
+- Application repositories own their own Helm charts and Kubernetes resources.
+- PRs must link the matching migration issue and planning document.

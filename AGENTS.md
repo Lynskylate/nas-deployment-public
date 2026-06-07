@@ -25,7 +25,6 @@
 
 ```
 nas-deployment-public/
-<<<<<<< HEAD
 ├── edge/ansible/             # Ansible playbooks, roles, host_vars（核心）
 ├── platform/                 # K3s 内平台组件（ArgoCD GitOps source）
 │   ├── applications/         # ArgoCD Application CRDs

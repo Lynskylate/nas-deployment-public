@@ -53,20 +53,27 @@
     path: "{{ vector_bin_path }}"
   register: vector_binary
 
-- name: Download and extract vector binary directly
-  ansible.builtin.unarchive:
-    src: "{{ vector_download_url }}/v{{ vector_version }}/vector-{{ vector_version }}-x86_64-unknown-linux-gnu.tar.gz"
-    dest: "{{ vector_bin_path | dirname }}"
-    remote_src: true
-    extra_opts:
-      - "--strip-components=2"
-      - "vector-x86_64-unknown-linux-gnu/bin/vector"
+- name: Download vector archive
+  ansible.builtin.get_url:
+    url: "{{ vector_download_url }}/v{{ vector_version }}/vector-{{ vector_version }}-x86_64-unknown-linux-gnu.tar.gz"
+    dest: /tmp/vector-{{ vector_version }}.tar.gz
+    timeout: 300
   environment: "{{ {'http_proxy': github_download_proxy, 'https_proxy': github_download_proxy} if (github_download_proxy | default('') | length > 0) else {} }}"
   register: vector_download_result
   retries: 5
   delay: 10
   until: vector_download_result is succeeded
   when: not vector_binary.stat.exists
+
+- name: Extract vector binary
+  ansible.builtin.unarchive:
+    src: /tmp/vector-{{ vector_version }}.tar.gz
+    dest: "{{ vector_bin_path | dirname }}"
+    remote_src: false
+    extra_opts:
+      - "--strip-components=2"
+      - "vector-x86_64-unknown-linux-gnu/bin/vector"
+  when: vector_download_result is succeeded
   notify: restart vector
 
 - name: Flush handlers

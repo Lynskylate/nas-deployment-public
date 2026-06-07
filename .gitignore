@@ -12,3 +12,4 @@ docs/plans/
 edge/pki/
 progress.md
 scout-ansible.md
+*.md

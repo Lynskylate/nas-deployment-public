@@ -14,11 +14,11 @@
 | node-exporter | DaemonSet (raw manifests) | 所有 K3s 节点 | 无状态 |
 | VM Operator | Helm chart `victoria-metrics-operator` | 任意节点 | 无状态 |
 | VMAgent | CRD (Operator 管理) | gtr nodeSelector | 无状态 |
-| Prometheus CRDs | Helm chart `prometheus-operator-crds` | — | — |
+| Prometheus CRDs | Helm chart `prometheus-operator-crds`（兼容保留） | — | — |
 
-**抓取架构**: `ServiceMonitor` / `VMStaticScrape` → Operator 生成配置 → `VMAgent` 抓取 → remote_write → `VictoriaMetrics`
+**抓取架构**: `VMServiceScrape` / `VMStaticScrape` → Operator 生成配置 → `VMAgent` 抓取 → remote_write → `VictoriaMetrics`
 
-所有 Victoria* 组件通过 Argo CD App-of-Apps 自动管理。同步顺序：`prometheus-operator-crds` (wave -2) → `observability-pv` / `victoria-metrics-operator` (wave -1) → 其余。
+所有 Victoria* 组件通过 Argo CD App-of-Apps 自动管理。同步顺序：`prometheus-operator-crds` (wave -2) → `observability-pv` / `victoria-metrics-operator` (wave -1) → `victoriametrics` / `victorialogs` / `victoriatraces` (wave 1) → `vmagent` (wave 2)。
 
 ---
 
@@ -38,7 +38,7 @@ platform/applications/
 platform/resources/
   observability-pv/pv-pvc.yaml  # 3 组 hostPath PV + PVC
   node-exporter/daemonset.yaml  # DaemonSet + headless Service
-  vmagent/vmagent.yaml          # VMAgent + ServiceMonitor + VMStaticScrape
+  vmagent/vmagent.yaml          # VMAgent + VMServiceScrape + VMStaticScrape
 
 grafana/datasources.yaml         # localhost → K8s Service DNS
 platform/resources/mihomo-monitoring/deployment.yaml  # VM 端点 → K8s Service DNS
@@ -60,10 +60,10 @@ sudo tar -czf /tmp/vm-backup-$(date +%Y%m%d).tar.gz /var/lib/victoriametrics/dat
 sudo tar -czf /tmp/vl-backup-$(date +%Y%m%d).tar.gz /var/lib/victorialogs/data
 sudo tar -czf /tmp/vt-backup-$(date +%Y%m%d).tar.gz /var/lib/victoriatraces/data
 
-# 3. 修复数据目录权限（容器以 UID 65534/nobody 运行）
-sudo chown -R 65534:65534 /var/lib/victoriametrics/data
-sudo chown -R 65534:65534 /var/lib/victorialogs/data
-sudo chown -R 65534:65534 /var/lib/victoriatraces/data
+# 3. 确认数据目录仍归历史服务用户所有（不要统一 chown 到 nobody）
+sudo ls -ld /var/lib/victoriametrics/data
+sudo ls -ld /var/lib/victorialogs/data
+sudo ls -ld /var/lib/victoriatraces/data
 ```
 
 #### Phase 2: 合并并部署
@@ -90,6 +90,12 @@ sudo systemctl disable victoriametrics victorialogs victoriatraces
 # 7. 停止 GTR 上的 bare-metal node_exporter（DaemonSet 需要端口 9100）
 sudo systemctl stop node_exporter
 sudo systemctl disable node_exporter
+
+# 7.1 停止其他 K3s 节点上的 bare-metal node_exporter
+# 当前 repo 已不再通过 Ansible 部署 systemd node_exporter；如历史遗留仍在，需一并停掉
+ssh ci@129.211.12.63 "sudo systemctl disable --now node_exporter || true"
+ssh ci@47.120.46.128 "sudo systemctl disable --now node_exporter || true"
+ssh ci@66.154.100.187 "sudo systemctl disable --now node_exporter || true"
 
 # 8. K8s pods 会自动重启并成功绑定端口
 #    验证:
@@ -135,7 +141,7 @@ ssh gtr
 sudo rm /etc/systemd/system/victoriametrics.service
 sudo rm /etc/systemd/system/victorialogs.service
 sudo rm /etc/systemd/system/victoriatraces.service
-# node_exporter 在 edge 节点仍需要（非 K3s 节点）
+# node_exporter 已迁移为 K3s DaemonSet；K3s 节点上不应再保留 bare-metal systemd unit
 sudo systemctl daemon-reload
 ```
 
@@ -178,9 +184,9 @@ sudo systemctl start victoriametrics victorialogs victoriatraces node_exporter
 
 ### 注意事项
 
-1. **端口冲突**: node-exporter DaemonSet 使用 `hostNetwork: true`，必须先停掉 bare-metal node_exporter 才能启动。所有 K3s 节点（gtr/tencent/aliyun/remote_proxy）都需要停。
+1. **端口冲突**: node-exporter DaemonSet 使用 `hostNetwork: true`，必须先停掉 bare-metal node_exporter 才能启动。所有 K3s 节点（gtr/tencent/aliyun/remote_proxy，对应 K8s 节点名 `remote-proxy`）都需要停。
 
-2. **数据目录权限**: 容器默认以 UID 65534 (nobody) 运行，而 bare-metal 服务各自有独立用户。迁移前必须 `chown -R 65534:65534` 数据目录。
+2. **数据目录权限**: `victorialogs` / `victoriatraces` chart 已固定使用历史服务 UID/GID（分别为 `995:995`、`989:993`）挂载原目录；不要再把目录统一 `chown` 成 `nobody`，否则会与现有数据目录所有权模型冲突。
 
 3. **PV 不可 auto-prune**: `observability-pv` Application 设置了 `prune: false`，防止 Argo CD 误删 PV/PVC 导致数据丢失。
 

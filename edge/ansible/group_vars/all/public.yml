@@ -1,4 +1,6 @@
-github_download_proxy: http://gtr.tail414c32.ts.net:7890
+# GTR 作为统一的 Tailscale 出口代理与可观测性汇聚点；基础设施路径统一走 IP，不依赖 MagicDNS。
+gtr_tailscale_ip: 100.121.0.67
+github_download_proxy: "http://{{ gtr_tailscale_ip }}:7890"
 shadowsocks_version: v1.18.2
 shadowtls_version: v0.2.25
 shadowsocks_download_url: https://github.com/shadowsocks/shadowsocks-rust/releases/download
@@ -13,9 +15,6 @@ shadowtls_server_listen_port: 8443
 ss_server_bin_path: /usr/local/shadowsocks-server
 stls_server_bin_path: /usr/local/shadow-tls-server
 edge_tunnel_server_enabled: false
-node_exporter_version: 1.8.2
-node_exporter_download_url: https://github.com/prometheus/node_exporter/releases/download
-node_exporter_bin_path: /usr/local/node_exporter
 node_exporter_port: 9100
 envoy_version: v1.37.0
 envoy_download_url: https://github.com/envoyproxy/envoy/releases/download
@@ -49,42 +48,18 @@ vector_config_dir: /etc/vector
 vector_data_dir: /var/lib/vector
 vector_log_path: /var/log/vector
 edge_vector_sink_type: local_file
-victorialogs_host: gtr.tail414c32.ts.net
+victorialogs_host: "{{ gtr_tailscale_ip }}"
 victorialogs_port: 8429
-victoriametrics_host: gtr.tail414c32.ts.net
+victoriametrics_host: "{{ gtr_tailscale_ip }}"
 victoriametrics_port: 8428
-victoriatraces_host: gtr.tail414c32.ts.net
+victoriatraces_host: "{{ gtr_tailscale_ip }}"
 victoriatraces_http_port: 9428
 edge_vector_otlp_grpc_listen: 127.0.0.1:4317
 edge_vector_otlp_http_listen: 127.0.0.1:4318
 edge_forbidden_proxy_ports:
-- 1080
-- 7890
-- 8888
-edge_proxy_vm_scrape_jobs:
-- job_name: edge_proxy_aliyun
-  scrape_interval: 15s
-  target: 47.120.46.128:80
-  metrics_path: /metrics
-  labels:
-    server: aliyun
-    role: edge_proxy
-- job_name: edge_proxy_remote_proxy
-  scrape_interval: 15s
-  target: 66.154.100.187:80
-  metrics_path: /metrics
-  labels:
-    server: remote_proxy
-    role: edge_proxy
-- job_name: edge_proxy_tencent
-  scrape_interval: 15s
-  target: 129.211.12.63:80
-  metrics_path: /metrics
-  labels:
-    server: tencent
-    role: edge_proxy
-edge_vm_scrape_config_path: /usr/local/victoriametrics/victoriametrics_sd.yaml
-edge_vm_service_name: victoriametrics
+  - 1080
+  - 7890
+  - 8888
 k3s_channel: stable
 # k3s_mirror: "cn" → use Rancher CN mirror; "" → use upstream GitHub. See k3s/README.md.
 k3s_mirror: "cn"
@@ -102,6 +77,6 @@ k3s_disable_components:
 
 # Containerd image pull proxy (docker.io blocked in China).
 # Each node overrides this in host_vars for its own proxy path.
-k3s_containerd_http_proxy: "http://100.121.0.67:7890"
-k3s_containerd_https_proxy: "http://gtr.tail414c32.ts.net:7890"
+k3s_containerd_http_proxy: "http://{{ gtr_tailscale_ip }}:7890"
+k3s_containerd_https_proxy: "http://{{ gtr_tailscale_ip }}:7890"
 k3s_containerd_no_proxy: "localhost,127.0.0.1,10.0.0.0/8,100.0.0.0/8"

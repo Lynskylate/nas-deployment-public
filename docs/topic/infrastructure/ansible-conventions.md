@@ -35,7 +35,11 @@ edge/ansible/
 
 Host groups: `edge_remote_proxy`, `edge_aliyun`, `edge_tencent`, `gtr_core`
 
-所有节点通过 Tailscale IP 连接。`ansible_ssh_common_args` 中设置 `-o StrictHostKeyChecking=no`。
+当前采用**公网 SSH + Tailscale API** 混合模式：
+
+- `tencent` / `aliyun` / `remote_proxy` 的管理面优先走公网 SSH
+- K3s 节点间通信、Flannel 与默认 API 访问走 Tailscale
+- `remote_proxy` 是 inventory alias；其 Kubernetes Node 名固定为 `remote-proxy`
 
 ### 其他 Inventory
 
@@ -88,14 +92,15 @@ Host groups: `edge_remote_proxy`, `edge_aliyun`, `edge_tencent`, `gtr_core`
 6. **Idempotency:** role 先检查 `systemctl is-active` / API 可达性，健康时 skip install，只 render config
 7. **CI shell 兼容:** 所有使用 `pipefail` 的 shell task 必须加 `args: executable: /bin/bash`（CI runner 的 `/bin/sh` 是 dash）
 
-## Roles Path 复用
+## Roles Path
 
-`edge/ansible/ansible.cfg` 的 `roles_path` 包含：
-```
-roles_path = ./roles:../../shadowsocks-shadowtls/ansible/roles
+`edge/ansible/ansible.cfg` 当前使用：
+
+```ini
+roles_path = ./roles
 ```
 
-这意味着 `edge` playbook 可以使用 `shadowsocks-shadowtls` 目录中的 role（如 `node-exporter`、`shadowsocks-server`）。如果移动/重命名该目录，edge 部署会中断。
+`edge` playbook 不应再依赖外部 role 目录。集群内 `node-exporter` 已迁移为 ArgoCD 管理的 DaemonSet，不再由 Ansible role 部署。
 
 ## 常用 Playbook 清单
 
@@ -103,19 +108,19 @@ roles_path = ./roles:../../shadowsocks-shadowtls/ansible/roles
 |----------|------|------|
 | `deploy-edge.yml` | edge baseline | `edge_*` |
 | `deploy-edge-tunnel-server.yml` | tunnel server | `edge_remote_proxy` |
-| `deploy-gtr-k3s-server.yml` | K3s server | `edge_aliyun` |
-| `deploy-gtr-k3s-agent.yml` | K3s agents | `gtr_core:edge_tencent` |
+| `deploy-gtr-k3s-server.yml` | K3s server | `edge_tencent` |
+| `deploy-gtr-k3s-agent.yml` | K3s agents | `gtr_core:edge_aliyun:edge_remote_proxy` |
 | `deploy-gtr-ai-tools.yml` | AI tools + Slock daemon | `gtr_core` |
 | `deploy-resource-manifest.yml` | resource manifest | `gtr_core` |
-| `deploy-platform-argocd.yml` | ArgoCD bootstrap | `edge_aliyun` |
+| `deploy-platform-argocd.yml` | ArgoCD bootstrap | `edge_tencent` |
 | `bootstrap-platform-sealed-secrets-key.yml` | Sealed Secrets 私钥恢复（controller 由 Argo CD 管理） | `edge_tencent` |
-| `deploy-platform-tailscale-operator.yml` | Tailscale Operator | `edge_aliyun` |
+| `deploy-platform-tailscale-operator.yml` | Tailscale Operator | `edge_tencent` |
 | `verify-edge-common.yml` | edge 验证 | `edge_*` |
-| `verify-gtr-k3s-server.yml` | K3s server 验证 | `edge_aliyun` |
-| `verify-gtr-k3s-agent.yml` | K3s agent 验证 | `gtr_core:edge_tencent` |
-| `verify-platform-argocd.yml` | ArgoCD 验证 | `edge_aliyun` |
-| `verify-platform-sealed-secrets.yml` | SealedSecrets 验证 | `edge_aliyun` |
-| `verify-platform-tailscale-operator.yml` | Tailscale Operator 验证 | `edge_aliyun` |
+| `verify-gtr-k3s-server.yml` | K3s server 验证 | `edge_tencent` |
+| `verify-gtr-k3s-agent.yml` | K3s agent 验证 | `gtr_core:edge_aliyun:edge_remote_proxy` |
+| `verify-platform-argocd.yml` | ArgoCD 验证 | `edge_tencent` |
+| `verify-platform-sealed-secrets.yml` | SealedSecrets 验证 | `edge_tencent` |
+| `verify-platform-tailscale-operator.yml` | Tailscale Operator 验证 | `edge_tencent` |
 
 ## 模板中用到的关键变量
 
@@ -128,9 +133,10 @@ roles_path = ./roles:../../shadowsocks-shadowtls/ansible/roles
 | `k3s_flannel_backend` | `group_vars/all/public.yml` | Flannel 后端（`vxlan`） |
 | `k3s_cluster_cidr` | `group_vars/all/public.yml` | Pod CIDR |
 | `k3s_service_cidr` | `group_vars/all/public.yml` | Service CIDR |
-| `k3s_server_tailscale_ip` | `host_vars/aliyun/public.yml` | API server 地址 |
+| `k3s_server_tailscale_ip` | `host_vars/tencent.yml` | API server 地址 |
 | `k3s_containerd_https_proxy` | `group_vars/all/public.yml` | 镜像拉取代理 |
 | `k3s_mirror` | `group_vars/all/public.yml` | Rancher CN 镜像源 |
+| `k3s_node_name` | `host_vars/<host>.yml` | K8s Node 对象名；`remote_proxy` 必须映射为 `remote-proxy` |
 
 ### ArgoCD
 
@@ -138,7 +144,7 @@ roles_path = ./roles:../../shadowsocks-shadowtls/ansible/roles
 |------|---------|------|
 | `argocd_version` | `roles/argocd/defaults/main.yml` | ArgoCD 版本 |
 | `argocd_repo_url` | `roles/argocd/defaults/main.yml` | 平台 GitOps 仓库 URL |
-| `argocd_repo_ssh_key` | `secret.runtime.yml`（vault） | GitHub deploy key |
+| `github_username` / `github_token` | `github-token.runtime.yml`（vault） | ArgoCD 访问 public repo 的 PAT 凭据 |
 
 ### Tailscale Operator
 

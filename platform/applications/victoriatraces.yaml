@@ -3,6 +3,8 @@ kind: Application
 metadata:
   name: victoriatraces
   namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
 spec:
   project: default
   source:
@@ -11,26 +13,33 @@ spec:
     targetRevision: 0.x
     helm:
       values: |
-        persistentVolume:
-          enabled: true
-          existingClaim: victoriatraces-data
-        extraArgs:
-          envflag.enable: "true"
-          envflag.prefix: VM_
-          loggerFormat: json
-        resources:
-          requests:
-            cpu: 100m
-            memory: 128Mi
-          limits:
-            cpu: "1"
-            memory: 512Mi
-        nodeSelector:
-          kubernetes.io/hostname: gtr
-        service:
-          annotations:
-            tailscale.com/expose: "true"
-            tailscale.com/proxy-class: gtr-only
+        server:
+          podSecurityContext:
+            enabled: true
+            fsGroup: 993
+            runAsGroup: 993
+            runAsNonRoot: true
+            runAsUser: 989
+          persistentVolume:
+            enabled: true
+            existingClaim: victoriatraces-data
+          extraArgs:
+            envflag.enable: "true"
+            envflag.prefix: VM_
+            loggerFormat: json
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          nodeSelector:
+            kubernetes.io/hostname: gtr
+          service:
+            annotations:
+              tailscale.com/expose: "true"
+              tailscale.com/proxy-class: gtr-only
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring

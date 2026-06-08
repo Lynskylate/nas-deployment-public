@@ -22,3 +22,7 @@ final-summary.md
 scout-ansible.md
 reviewer-*.md
 REVIEW_REPORT*.md
+
+# Local validation artifacts
+logs/
+edge/ansible/context-build/

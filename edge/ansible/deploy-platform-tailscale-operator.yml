@@ -1,5 +1,5 @@
 ---
-- name: Pre-create Tailscale Operator prerequisites on aliyun K3s
+- name: Pre-create Tailscale Operator prerequisites on tencent K3s
   hosts: edge_tencent
   become: true
   gather_facts: false

@@ -16,12 +16,12 @@ k3s_server_tls_sans:
 # P2P heal to GTR
 tailscale_p2p_heal_enabled: true
 tailscale_p2p_peer_name: gtr
-tailscale_p2p_peer_ip: 100.121.0.67
+tailscale_p2p_peer_ip: "{{ gtr_tailscale_ip }}"
 
 # Tencent Cloud 国内节点，镜像拉取走 GTR mihomo 代理
-github_download_proxy: "http://gtr.tail414c32.ts.net:7890"
-k3s_containerd_http_proxy: "http://100.121.0.67:7890"
-k3s_containerd_https_proxy: "http://gtr.tail414c32.ts.net:7890"
+github_download_proxy: "http://{{ gtr_tailscale_ip }}:7890"
+k3s_containerd_http_proxy: "http://{{ gtr_tailscale_ip }}:7890"
+k3s_containerd_https_proxy: "http://{{ gtr_tailscale_ip }}:7890"
 k3s_prereq_tailscale_nodivert: true
 
 k3s_node_labels:

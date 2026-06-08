@@ -1,5 +1,5 @@
 ---
-- name: Deploy unified edge baseline to remote_proxy and aliyun
+- name: Deploy unified edge baseline to K3s edge nodes
   hosts: edge_hosts
   become: true
 
@@ -22,7 +22,6 @@
       when: github_download_proxy | default('') | length > 0
 
   roles:
-    - role: node-exporter
     - role: edge-tailscale
     - role: tailscale-p2p-heal
     - role: edge-vector
@@ -33,7 +32,7 @@
     - name: Ensure all edge services are running
       ansible.builtin.shell: |
         set -e
-        svcs="node_exporter tailscaled envoy{% if edge_vector_enabled | bool %} vector{% endif %}"
+        svcs="tailscaled envoy{% if edge_vector_enabled | bool %} vector{% endif %}"
         for svc in $svcs; do
           systemctl is-active "$svc" >/dev/null 2>&1 || systemctl start "$svc"
         done

@@ -3,6 +3,13 @@
 # Overseas node: direct GitHub access, no proxy needed
 github_download_proxy: ""
 k3s_mirror: ""
+k3s_node_name: remote-proxy
+k3s_node_labels:
+  gtr.io/region: us
+  gtr.io/visibility: public
+  topology.kubernetes.io/region: us-west
+k3s_node_taints:
+  - "NoSchedule=true:NoSchedule"
 
 edge_tunnel_server_enabled: true
 

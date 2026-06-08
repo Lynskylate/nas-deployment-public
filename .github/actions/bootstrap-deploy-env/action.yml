@@ -90,6 +90,12 @@ runs:
             > .vault/repo/infra/sealed-secrets/key-backup.runtime.yaml
         fi
 
+        if find edge/ansible -name '*.sops.yml' -print -quit | grep -q .; then
+          echo "ERROR: public repo 工作树中发现残留的 .sops.yml，请先清理后再运行部署。" >&2
+          find edge/ansible -name '*.sops.yml' -print >&2
+          exit 1
+        fi
+
         sops --decrypt .vault/repo/grafana/secret.sops.yml > grafana/secret.runtime.yml
         chmod 600 \
           edge/ansible/group_vars/all/secret.runtime.yml \

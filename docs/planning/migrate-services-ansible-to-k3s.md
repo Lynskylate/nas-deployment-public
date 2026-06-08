@@ -1,5 +1,7 @@
 # [Plan] 应用服务从 Ansible 迁移到 K3s/ArgoCD
 
+> 注：本文是迁移规划文档。当前真实拓扑以 `AGENTS.md` 与 `k3s/README.md` 为准：`tencent` 是 control-plane，`aliyun` 是 agent，`remote_proxy` 的 Kubernetes Node 名为 `remote-proxy`。
+
 ## 概述
 
 **目标：** 将当前由 Ansible 裸金属部署的非必要应用服务迁移到 K3s 集群中，由 ArgoCD 管理。Ansible 仅保留 K3s 运行所必需的基础设施层。
@@ -25,16 +27,16 @@
 
 ```
 K3s Cluster (4 nodes)
-├─ aliyun       (control-plane, taint: CriticalAddonsOnly)
-│   Tailscale: 100.100.99.70  |  位置: 中国阿里云  |  调度: 仅系统组件
+├─ tencent      (control-plane)
+│   Tailscale: 100.99.48.76   |  位置: 中国腾讯云  |  调度: control-plane
 │
 ├─ gtr          (agent, 无 taint)
 │   Tailscale: 100.121.0.67   |  位置: 家庭服务器   |  调度: 主要工作负载
 │
-├─ tencent      (agent, 无 taint)
-│   Tailscale: 100.99.48.76   |  位置: 中国腾讯云   |  调度: 可调度无状态负载 (磁盘类优先 gtr)
+├─ aliyun       (agent, taint: CriticalAddonsOnly)
+│   Tailscale: 100.100.99.70  |  位置: 中国阿里云  |  调度: 仅系统组件
 │
-└─ remote_proxy (agent, taint: NoSchedule)
+└─ remote-proxy (agent, taint: NoSchedule)
     Tailscale: 100.66.156.40  |  位置: 美国 VPS     |  调度: 仅系统组件 (跨洋 ~200ms)
 ```
 
@@ -117,9 +119,9 @@ kubectl taint nodes aliyun CriticalAddonsOnly=true:NoSchedule --overwrite
 # tencent (remove any existing taint — can schedule stateless workloads)
 kubectl taint nodes tencent NoSchedule- 2>/dev/null || true
 
-# remote_proxy (额外标注跨洋延迟)
-kubectl taint nodes remote_proxy NoSchedule=true:NoSchedule
-kubectl label nodes remote_proxy topology.kubernetes.io/region=us-west
+# remote-proxy (额外标注跨洋延迟)
+kubectl taint nodes remote-proxy NoSchedule=true:NoSchedule
+kubectl label nodes remote-proxy topology.kubernetes.io/region=us-west
 ```
 
 **GTR 添加 toleration 以承载工作负载：**

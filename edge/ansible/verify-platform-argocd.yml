@@ -1,8 +1,11 @@
 ---
-- name: Verify Argo CD on aliyun K3s
+- name: Verify Argo CD on tencent K3s
   hosts: edge_tencent
   become: true
   gather_facts: false
+  vars:
+    argocd_expected_repo_url: https://github.com/Lynskylate/nas-deployment-public.git
+    argocd_expected_repo_path: platform/applications
 
   tasks:
     - name: Check Argo CD pods
@@ -22,6 +25,35 @@
         k3s kubectl -n argocd get svc
       register: argocd_services
       changed_when: false
+
+    - name: Read platform-apps source
+      ansible.builtin.shell: |
+        k3s kubectl -n argocd get application platform-apps \
+          -o jsonpath='{.spec.source.repoURL}{"\n"}{.spec.source.targetRevision}{"\n"}{.spec.source.path}'
+      register: argocd_platform_apps_source
+      changed_when: false
+      failed_when: argocd_platform_apps_source.rc != 0
+
+    - name: Parse platform-apps source
+      ansible.builtin.set_fact:
+        argocd_platform_apps_repo_url: "{{ (argocd_platform_apps_source.stdout_lines | default([]))[0] | default('') }}"
+        argocd_platform_apps_target_revision: "{{ (argocd_platform_apps_source.stdout_lines | default([]))[1] | default('') }}"
+        argocd_platform_apps_path: "{{ (argocd_platform_apps_source.stdout_lines | default([]))[2] | default('') }}"
+
+    - name: Assert platform-apps points to the formal GitHub repo
+      ansible.builtin.assert:
+        that:
+          - argocd_platform_apps_repo_url == argocd_expected_repo_url
+          - argocd_platform_apps_target_revision in ['HEAD', 'main']
+          - argocd_platform_apps_path == argocd_expected_repo_path
+        fail_msg: >-
+          platform-apps source mismatch:
+          repoURL={{ argocd_platform_apps_repo_url }},
+          targetRevision={{ argocd_platform_apps_target_revision }},
+          path={{ argocd_platform_apps_path }}.
+          Expected repoURL={{ argocd_expected_repo_url }},
+          targetRevision in [HEAD, main],
+          path={{ argocd_expected_repo_path }}.
 
     - name: Check argocd-server deployment status
       ansible.builtin.shell: |
@@ -57,6 +89,11 @@
           - ""
           - "Services:"
           - "{{ argocd_services.stdout }}"
+          - ""
+          - "platform-apps source:"
+          - "  repoURL={{ argocd_platform_apps_repo_url }}"
+          - "  targetRevision={{ argocd_platform_apps_target_revision }}"
+          - "  path={{ argocd_platform_apps_path }}"
           - ""
           - "argocd-server rollout: {{ argocd_server_status.stdout | default('check failed') }}"
           - "admin secret exists: {{ argocd_admin_secret.stdout != '' }}"

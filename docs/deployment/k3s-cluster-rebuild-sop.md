@@ -9,18 +9,23 @@
 |------|------|
 | K3s server | aliyun(100.100.99.70) → **tencent(100.99.48.76)** |
 | 节点角色 | aliyun: control-plane → agent |
-| 节点拓扑 | +remote_proxy(100.66.156.40) 作为 agent（美国，NoSchedule） |
+| 节点拓扑 | +remote_proxy(100.66.156.40) 作为 agent（美国，NoSchedule；K8s Node 名为 `remote-proxy`） |
 | SealedSecrets | Ansible 直接部署 → ArgoCD Helm chart 管理；新增 `bootstrap-platform-sealed-secrets-key.yml` 恢复旧密钥 |
 | ArgoCD repo auth | SSH key → PAT (`github_username` + `github_token`) |
 | CI 拓扑验证 | 重写为 tencent-as-server 拓扑 |
 | kubeseal | 不再安装到节点（运维人员在本地使用）；verify playbook 不再依赖 kubeseal |
 | Token 处理 | 集群 token 使用 SOPS **加密字符串**（非明文），禁止手动解密写入 config.yaml |
 | aliyun agent | 通过 Tailscale IP `100.99.48.76:6443` 直连 tencent（非公网 IP） |
+| aliyun DNS | 禁用 Tailscale MagicDNS 覆盖，`/etc/resolv.conf` 恢复为 `systemd-resolved` stub；基础设施统一走 `100.121.0.67` |
 
-**未追踪文件（需本地存在但不可提交）：**
-- `edge/ansible/group_vars/all/secret.sops.yml` ← vault `ansible/edge/group_vars/all/secret.sops.yml`
-- `edge/ansible/group_vars/all/github-token.sops.yml` ← vault `infra/argocd/github-token.sops.yml`
-- `edge/ansible/host_vars/gtr/secret.sops.yml` ← vault `ansible/edge/host_vars/gtr/secret.sops.yml`
+**本地运行时文件（可生成但不可提交）：**
+- `edge/ansible/group_vars/all/secret.runtime.yml`
+- `edge/ansible/group_vars/all/github-token.runtime.yml`
+- `edge/ansible/host_vars/gtr/secret.runtime.yml`
+
+**禁止出现在 public repo 工作树中的文件：**
+- `edge/ansible/**/secret.sops.yml`
+- `edge/ansible/**/github-token.sops.yml`
 
 ---
 
@@ -59,11 +64,11 @@ CI 自动解析依赖顺序：
 preflight (解析部署计划)
   ├─ deploy-gtr (Mihomo, 资源清单, AI工具)
   │     └─ 需要 Tailscale
-  ├─ deploy-edge (edge baseline: Envoy, Node Exporter, Vector)
+  ├─ deploy-edge (edge baseline: Envoy, Tailscale, Vector)
   │     └─ matrix: remote_proxy, aliyun, tencent
   ├─ deploy-k3s-server (K3s server on tencent)
   │     └─ 不需要 Tailscale（走 ansible_host=129.211.12.63 SSH）
-  ├─ deploy-k3s-agent (K3s agents: gtr, aliyun, remote_proxy)
+  ├─ deploy-k3s-agent (K3s agents: gtr, aliyun, remote_proxy -> node `remote-proxy`)
   │     └─ 通过 Tailscale IP 连接 server
   └─ deploy-platform-operators
         ├─ deploy-platform-argocd.yml
@@ -128,7 +133,7 @@ cd edge/ansible
 ansible-playbook -i inventory-edge.ini deploy-gtr-k3s-server.yml -v
 ansible-playbook -i inventory-edge.ini verify-gtr-k3s-server.yml -v
 
-# 2. 部署 K3s agents（gtr, aliyun, remote_proxy）
+# 2. 部署 K3s agents（gtr, aliyun, remote_proxy -> node `remote-proxy`）
 ansible-playbook -i inventory-edge.ini deploy-gtr-k3s-agent.yml -v
 ansible-playbook -i inventory-edge.ini verify-gtr-k3s-agent.yml -v
 
@@ -154,11 +159,18 @@ ansible-playbook -i inventory-edge.ini deploy-platform-tailscale-operator.yml -v
 
 ### 1. Token 处理 🔴 致命
 
-**集群 token 是 SOPS 加密字符串** `ENC[AES256_GCM,data:omW8...]`，不是解密后的明文。如果 Ansible playbook 重新运行时 SOPS 解密了 token 并将明文写入 `config.yaml`，server 重启会 crash：
+K3s server / agent 必须使用**同一份解密后的 cluster token**。重建时应始终从 vault 解密到 `*.runtime.yml`，不要手工抄写、重置或混用旧 token。
+
+如果 token 与现有 bootstrap data 不一致，server 重启会报错：
 ```
 fatal: bootstrap data already found and encrypted with different token
 ```
-**修复**：确保 server config.yaml 中的 token 与原始部署时一致（即 SOPS 加密字符串）。CI 流程中 bootstrap-deploy-env action 解密文件到 `.runtime.yml`，Ansible 会加载 `.runtime.yml` 覆盖 SOPS 加密变量——需确认 Ansible 的 var 优先级不会导致 token 被替换。
+
+修复方式：
+
+- 统一以 vault 中的 `secret.sops.yml` 为唯一真源
+- 只让 Ansible 读取 `*.runtime.yml`
+- 运行前清理 public repo 工作树中残留的 `*.sops.yml`
 
 ### 2. kubeseal `--raw` 模式 🔴
 
@@ -177,6 +189,8 @@ kubectl create secret generic xxx --dry-run=client -o yaml \
 - `deploy-platform-sealed-secrets.yml` **已删除**（之前用 `kubectl apply` 部署 raw manifest，造成双 Controller 冲突）
 - 现在由 ArgoCD Helm chart 管理
 - 新集群必须先用 `bootstrap-platform-sealed-secrets-key.yml` 恢复旧私钥，否则所有 SealedSecret CRD 都解不开
+- bootstrap playbook 会先比较 vault 证书指纹；如果集群里已有同指纹 key，则跳过重复 apply
+- 如果发现 Helm 首启自动生成了与 vault 不同指纹的新 key，bootstrap playbook 会删除这些 non-matching key 并重启 controller，避免 `SealedSecret` 在成功/失败之间反复翻转
 - 旧私钥备份位置：vault `infra/sealed-secrets/key-backup.enc.yaml`
 
 ### 4. 网络拓扑
@@ -195,6 +209,7 @@ kubectl create secret generic xxx --dry-run=client -o yaml \
 
 - `k3s_mirror: ""`（海外节点不用 CN mirror）
 - `github_download_proxy: ""`（海外直接访问 GitHub）
+- `k3s_node_name: remote-proxy`（RFC1123-safe K8s Node 名）
 - 打 `NoSchedule` taint：不调度业务 Pod
 - `k3s_flannel_iface: tailscale0`（从 group_vars 继承）
 
@@ -206,7 +221,7 @@ kubectl create secret generic xxx --dry-run=client -o yaml \
 
 ## 验证清单
 
-- [ ] 4 节点全部 `Ready`：`kubectl get nodes`
+- [ ] 4 节点全部 `Ready`：`kubectl get nodes`（其中海外节点名应为 `remote-proxy`）
 - [ ] ArgoCD 所有 apps `Synced / Healthy`：`kubectl -n argocd get application`
 - [ ] mihomo-metrics pod `Running`：`kubectl -n monitoring get pods`
 - [ ] `mihomo-api` Secret 有正确值：`kubectl -n monitoring get secret mihomo-api -o jsonpath='{.data.MIHOMO_SECRET}' | base64 -d | head -c 32`

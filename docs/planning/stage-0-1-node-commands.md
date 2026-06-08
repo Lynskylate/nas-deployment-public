@@ -1,80 +1,64 @@
 # 阶段 0+1 节点操作命令
 
+> 本文保留阶段化说明，但节点角色已更新为：`tencent` 是 server，`aliyun` 是 agent，`remote_proxy` 的 Kubernetes Node 名必须写成 `remote-proxy`。
+
 ## 部署流程概述
 
-ArgoCD 的 **App-of-Apps** 已在 `edge/ansible/roles/argocd/tasks/main.yml` 中创建，
-自动 watch `platform/applications/` 目录（`directory: { recurse: true }`）。
+ArgoCD App-of-Apps 会自动 watch `platform/applications/`，因此：
 
-```
-git push → ArgoCD App-of-Apps 发现新 Application CRD
-         → 自动注册到 ArgoCD
-         → 各 Application 从 platform/resources/<service>/ sync 资源
+```text
+git push
+  -> ArgoCD 发现新的/变更的 Application CRD
+  -> 自动注册 Application
+  -> 各 Application 从 platform/resources/ 或 Helm values 同步
 ```
 
-**无需手动 `kubectl apply` Application CRD 文件。** 只需提交并 push 即可。
+原则：**不要手动 `kubectl apply` Application CRD；优先通过 GitOps。**
 
 ## 先决条件
 
-- 已通过 Tailscale 连接到 K3s 集群
-- `kubectl` 已配置指向 `https://100.100.99.70:6443`
-- ArgoCD App-of-Apps 已部署（`deploy-platform-argocd.yml` 已执行过）
+- 已通过 Tailscale 连到集群
+- `kubectl` 指向 `https://100.99.48.76:6443`
+- `deploy-platform-argocd.yml` 已执行
 
----
-
-## 0.1 remote_proxy 加入 K3s agent
+## 0.1 agent 加入集群
 
 ```bash
 cd edge/ansible
-ansible-playbook -i inventory-edge.ini deploy-gtr-k3s-agent.yml --limit remote_proxy -v
+ansible-playbook -i inventory-edge.ini deploy-gtr-k3s-agent.yml --limit aliyun,remote_proxy,gtr -v
 ```
 
-> **注意：** remote_proxy 在美国（跨洋 ~200ms 延迟），加入 K3s 仅用于运行 DaemonSet（node_exporter、Vector）。
+说明：
 
-## 0.2 节点 Taint 配置
+- `remote_proxy` 是 inventory alias
+- K8s Node 对象名固定为 `remote-proxy`
+- 海外节点只运行 DaemonSet / 基础组件，不承载普通 workload
 
-### aliyun — 禁止调度业务容器（仅系统组件）
+## 0.2 节点 taint / label
 
-```bash
-kubectl taint nodes aliyun CriticalAddonsOnly=true:NoSchedule --overwrite
-```
+这些状态现在应优先由 Ansible 变量驱动：
 
-验证：
+- `host_vars/aliyun/public.yml` → `k3s_node_taints`
+- `host_vars/remote_proxy.yml` → `k3s_node_taints` + `k3s_node_labels`
+
+手动核对命令：
+
 ```bash
 kubectl describe node aliyun | grep -A5 Taints
-# Taints: node-role.kubernetes.io/control-plane:NoSchedule
-#          CriticalAddonsOnly=true:NoSchedule
-```
-
-### tencent — 允许调度无状态工作负载（不打 taint）
-
-```bash
-kubectl taint nodes tencent NoSchedule- 2>/dev/null || true
-```
-
-验证：
-```bash
+kubectl describe node remote-proxy | grep -A8 'Taints\\|Labels'
 kubectl describe node tencent | grep -A5 Taints
-# 预期：无 Taints
 ```
 
-### remote_proxy — 禁止调度（跨洋延迟）
+预期：
 
-```bash
-kubectl taint nodes remote_proxy NoSchedule=true:NoSchedule --overwrite
-kubectl label nodes remote_proxy topology.kubernetes.io/region=us-west --overwrite
-```
+- `aliyun` 含 `CriticalAddonsOnly=true:NoSchedule`
+- `remote-proxy` 含 `NoSchedule=true:NoSchedule`
+- `remote-proxy` 含 `topology.kubernetes.io/region=us-west`
+- `tencent` 无额外业务 taint
 
-验证：
-```bash
-kubectl describe node remote_proxy | grep -A5 Taints
-# Taints: NoSchedule=true:NoSchedule
-```
+## 0.3 Mihomo API SealedSecret
 
-## 0.3 GTR 节点标签
-
-```bash
-kubectl label nodes gtr node-role.kubernetes.io/workload=true --overwrite
-```
+Mihomo 监控所需 Secret 应通过 SealedSecret 进入集群，不要长期手工创建明文 Secret。
 
 ---
 

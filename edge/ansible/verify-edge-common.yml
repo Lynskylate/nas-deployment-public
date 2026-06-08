@@ -8,13 +8,40 @@
     - name: Verify required services are active
       ansible.builtin.shell: |
         set -e
-        for svc in node_exporter tailscaled envoy; do
+        for svc in tailscaled envoy; do
           systemctl is-active "$svc" >/dev/null || { echo "FAIL: $svc is not active"; exit 1; }
         done
         {% if edge_vector_enabled | bool %}
         systemctl is-active vector >/dev/null || { echo "FAIL: vector is not active"; exit 1; }
         {% endif %}
       changed_when: false
+
+    - name: Read current tailscale accept-dns setting
+      ansible.builtin.shell: |
+        set -o pipefail
+        tailscale debug prefs 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(str(d.get('CorpDNS', True)).lower())"
+      args:
+        executable: /bin/bash
+      register: edge_tailscale_corp_dns
+      changed_when: false
+      failed_when: false
+
+    - name: Read effective resolv.conf target when tailscale DNS is disabled
+      ansible.builtin.command: readlink -f /etc/resolv.conf
+      register: edge_tailscale_resolv_conf_target
+      changed_when: false
+      when: not (edge_tailscale_accept_dns | default(true) | bool)
+
+    - name: Assert tailscale DNS contract
+      ansible.builtin.assert:
+        that:
+          - (edge_tailscale_corp_dns.stdout | trim | lower) == ((edge_tailscale_accept_dns | default(true) | bool) | ternary('true', 'false'))
+          - (edge_tailscale_accept_dns | default(true) | bool) or (edge_tailscale_resolv_conf_target.stdout | trim == '/run/systemd/resolve/stub-resolv.conf')
+        fail_msg: >-
+          Tailscale DNS 契约不满足：
+          accept_dns_expected={{ (edge_tailscale_accept_dns | default(true) | bool) | ternary('true', 'false') }}
+          accept_dns_actual={{ edge_tailscale_corp_dns.stdout | trim | lower }}
+          resolv_conf_target={{ edge_tailscale_resolv_conf_target.stdout | default('not-checked') | trim }}
 
     - name: Check edge ports and forbidden proxy ports
       ansible.builtin.shell: |
@@ -36,22 +63,6 @@
       ansible.builtin.uri:
         url: "http://127.0.0.1:{{ envoy_admin_port }}/stats"
         return_content: false
-
-    - name: Verify node_exporter endpoint
-      ansible.builtin.uri:
-        url: "http://127.0.0.1:{{ node_exporter_port }}/metrics"
-        return_content: false
-
-    - name: Verify metrics route through envoy
-      ansible.builtin.uri:
-        url: "http://127.0.0.1:{{ envoy_listener_port }}/metrics"
-        return_content: false
-
-    - name: Verify metrics route through envoy HTTP listener
-      ansible.builtin.uri:
-        url: "http://127.0.0.1:{{ envoy_http_listener_port }}/metrics"
-        return_content: false
-      when: envoy_http_listener_enabled | bool
 
     - name: Assert envoy admin path is not exposed on public listeners
       ansible.builtin.shell: |

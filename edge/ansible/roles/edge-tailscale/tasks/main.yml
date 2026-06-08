@@ -27,3 +27,45 @@
     tailscale version 2>/dev/null || true
   changed_when: false
   when: edge_tailscale_info.rc == 2
+
+- name: Read current tailscale accept-dns setting
+  ansible.builtin.shell: |
+    set -o pipefail
+    tailscale debug prefs 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(str(d.get('CorpDNS', True)).lower())"
+  args:
+    executable: /bin/bash
+  register: edge_tailscale_corp_dns
+  changed_when: false
+  failed_when: false
+
+- name: Apply desired tailscale accept-dns setting
+  ansible.builtin.command: >-
+    tailscale set --accept-dns={{ (edge_tailscale_accept_dns | bool) | ternary('true', 'false') }}
+  register: edge_tailscale_set_dns
+  changed_when: edge_tailscale_set_dns.rc == 0
+  when: >-
+    (edge_tailscale_corp_dns.stdout | trim | lower)
+    != ((edge_tailscale_accept_dns | bool) | ternary('true', 'false'))
+
+- name: Check systemd-resolved stub resolver path when tailscale DNS is disabled
+  ansible.builtin.stat:
+    path: "{{ edge_tailscale_resolv_conf_stub_path }}"
+  register: edge_tailscale_stub_resolv_conf
+  when: not (edge_tailscale_accept_dns | bool)
+
+- name: Assert systemd-resolved stub resolver exists when tailscale DNS is disabled
+  ansible.builtin.assert:
+    that:
+      - edge_tailscale_stub_resolv_conf.stat.exists
+    fail_msg: >-
+      Tailscale DNS 已禁用，但 systemd-resolved stub 不存在：
+      {{ edge_tailscale_resolv_conf_stub_path }}
+  when: not (edge_tailscale_accept_dns | bool)
+
+- name: Restore /etc/resolv.conf to systemd-resolved stub when tailscale DNS is disabled
+  ansible.builtin.file:
+    path: "{{ edge_tailscale_resolv_conf_path }}"
+    src: "{{ edge_tailscale_resolv_conf_stub_path }}"
+    state: link
+    force: true
+  when: not (edge_tailscale_accept_dns | bool)

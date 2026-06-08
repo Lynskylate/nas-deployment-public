@@ -8,9 +8,7 @@ spec:
   source:
     repoURL: https://github.com/Lynskylate/nas-deployment-public.git
     path: platform/resources/node-exporter
-    targetRevision: feat/observability-k8s-migration
-    directory:
-      recurse: false
+    targetRevision: main
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring

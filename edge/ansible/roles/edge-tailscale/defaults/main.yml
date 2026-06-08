@@ -1,0 +1,4 @@
+---
+edge_tailscale_accept_dns: true
+edge_tailscale_resolv_conf_path: /etc/resolv.conf
+edge_tailscale_resolv_conf_stub_path: /run/systemd/resolve/stub-resolv.conf

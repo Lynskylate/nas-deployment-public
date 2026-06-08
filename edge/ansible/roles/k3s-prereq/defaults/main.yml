@@ -19,6 +19,9 @@ k3s_prereq_sysctls:
   net.bridge.bridge-nf-call-ip6tables: 1
   net.ipv4.ip_forward: 1
 
+# Skip apt cache update for nodes with unreliable DNS (e.g., aliyun IO-pressure)
+k3s_prereq_skip_apt_update: false
+
 # Enable tailscale --netfilter-mode=nodivert for cloud nodes with 100.x CGNAT conflict.
 # Prevents Tailscale from injecting iptables rules that DROP 100.64.0.0/10
 # traffic not arriving on tailscale0, which breaks cloud provider internal services.

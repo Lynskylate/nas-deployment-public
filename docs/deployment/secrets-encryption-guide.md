@@ -32,7 +32,7 @@
 
 ### 前置条件
 
-- `kubectl` 已配置指向 K3s 集群（`https://100.100.99.70:6443`，通过 Tailscale 可达）
+- `kubectl` 已配置指向 K3s 集群（`https://100.99.48.76:6443`，通过 Tailscale 可达）
 - SealedSecrets controller 已在集群中运行（ArgoCD Application `sealed-secrets`）
 - `kubeseal` CLI 已安装
 

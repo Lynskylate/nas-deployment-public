@@ -1,9 +1,13 @@
 # VMAgent — scrape proxy managed by VictoriaMetrics Operator
-# Watches ServiceMonitor + VMStaticScrape CRDs, scrapes targets,
-# and remote_writes all metrics to VictoriaMetrics.
+# Watches VM-native scrape CRDs and remote_writes all metrics
+# to VictoriaMetrics.
 #
 # Architecture:
-#   ServiceMonitor / VMStaticScrape → Operator generates config → VMAgent scrapes → remote_write → VictoriaMetrics
+#   VMServiceScrape / VMPodScrape / VMStaticScrape
+#     → Operator generates config
+#     → VMAgent scrapes
+#     → remote_write
+#     → VictoriaMetrics
 ---
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMAgent
@@ -12,7 +16,7 @@ metadata:
   namespace: monitoring
 spec:
   selectAllByDefault: true
-  # Watch both VM-native and Prometheus Operator CRDs
+  # Watch VM-native scrape CRDs
   serviceScrapeSelector: {}
   serviceScrapeNamespaceSelector: {}
   podScrapeSelector: {}
@@ -38,22 +42,24 @@ spec:
       static_configs:
         - targets: ["localhost:8429"]
 ---
-# --- In-cluster ServiceMonitors ---
+# --- In-cluster VMServiceScrapes ---
 
 # VictoriaMetrics self-monitoring
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
 metadata:
   name: victoriametrics
   namespace: monitoring
   labels:
     app: victoriametrics
 spec:
+  attach_metadata: {}
   selector:
     matchLabels:
       app: victoriametrics
   endpoints:
-    - port: http
+    - attach_metadata: {}
+      port: http
       interval: 15s
       path: /metrics
   namespaceSelector:
@@ -61,23 +67,25 @@ spec:
       - monitoring
 ---
 # Node Exporter (DaemonSet headless Service)
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
 metadata:
   name: node-exporter
   namespace: monitoring
   labels:
     app: node-exporter
 spec:
+  attach_metadata: {}
   selector:
     matchLabels:
       app: node-exporter
   endpoints:
-    - port: metrics
+    - attach_metadata: {}
+      port: metrics
       interval: 15s
       path: /metrics
       # Enrich with node labels from pod metadata
-      relabelings:
+      relabelConfigs:
         - sourceLabels: [__meta_kubernetes_pod_node_name]
           targetLabel: node
   namespaceSelector:

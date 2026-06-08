@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 INVENTORY_PATH = ROOT / "edge/ansible/inventory-edge.ini"
 GLOBAL_VARS_PATH = ROOT / "edge/ansible/group_vars/all/public.yml"
 TENCENT_VARS_PATH = ROOT / "edge/ansible/host_vars/tencent.yml"
+REMOTE_PROXY_VARS_PATH = ROOT / "edge/ansible/host_vars/remote_proxy.yml"
 
 TAILSCALE_CGNAT = ipaddress.ip_network("100.64.0.0/10")
 
@@ -53,6 +54,7 @@ def is_cgnat_ip(value: str) -> bool:
 def main() -> int:
     global_vars = load_yaml(GLOBAL_VARS_PATH)
     tencent_vars = load_yaml(TENCENT_VARS_PATH)
+    remote_proxy_vars = load_yaml(REMOTE_PROXY_VARS_PATH)
 
     errors: list[str] = []
     notes: list[str] = []
@@ -97,6 +99,14 @@ def main() -> int:
         except ValueError as exc:
             errors.append(f"aliyun 的 `ansible_host` 不是合法 IP: {exc}")
 
+    # 2.1 remote_proxy must use an RFC1123-safe Kubernetes node name
+    remote_proxy_node_name = remote_proxy_vars.get("k3s_node_name", "")
+    if remote_proxy_node_name != "remote-proxy":
+        errors.append(
+            "remote_proxy 必须显式设置 `k3s_node_name: remote-proxy`，"
+            "避免把 inventory alias 里的下划线写入 Kubernetes Node 名。"
+        )
+
     # 3. K3s server (tencent) Tailscale IP must be in CGNAT range
     k3s_server_tailscale_ip = tencent_vars.get("k3s_server_tailscale_ip", "")
     if not k3s_server_tailscale_ip:
@@ -139,7 +149,7 @@ def main() -> int:
             "否则云厂商 100.x 网段冲突会再次导致 SSH/控制面失联。"
         )
 
-    # 7. aliyun agent must connect via tencent's public IP (DPI-safe)
+    # 7. aliyun agent must follow the current cluster API contract
     aliyun_vars_path = ROOT / "edge/ansible/host_vars/aliyun/public.yml"
     aliyun_vars = load_yaml(aliyun_vars_path)
     aliyun_agent_url = aliyun_vars.get("k3s_agent_server_url", "")
@@ -148,13 +158,14 @@ def main() -> int:
     except ValueError as exc:
         errors.append(str(exc))
         aliyun_agent_host = ""
-    if aliyun_agent_host and tencent_ansible_host and aliyun_agent_host != tencent_ansible_host:
+    if aliyun_agent_host and k3s_server_tailscale_ip and aliyun_agent_host != k3s_server_tailscale_ip:
         errors.append(
-            "aliyun 的 `k3s_agent_server_url` 必须指向 tencent 的公网管理地址，"
-            f"当前为 {aliyun_agent_host} != {tencent_ansible_host}。"
+            "aliyun 的 `k3s_agent_server_url` 必须指向当前 K3s API 地址"
+            f"（tencent Tailscale IP），当前为 {aliyun_agent_host} != {k3s_server_tailscale_ip}。"
         )
 
     notes.append(f"remote_proxy SSH 管理面: {remote_proxy_ansible_host or 'missing'}")
+    notes.append(f"remote_proxy K8s 节点名: {remote_proxy_node_name or 'missing'}")
     notes.append(f"aliyun SSH 管理面: {aliyun_ansible_host or 'missing'}")
     notes.append(f"cluster API: {k3s_server_url or 'missing'}")
     notes.append(f"tencent (server) Tailscale IP: {k3s_server_tailscale_ip or 'missing'}")

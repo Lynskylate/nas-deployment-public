@@ -1,6 +1,6 @@
 ---
-- name: Verify K3s agents on GTR
-  hosts: gtr_core
+- name: Verify K3s agents on GTR, aliyun, remote_proxy
+  hosts: gtr_core:edge_aliyun:edge_remote_proxy
   become: true
 
   tasks:
@@ -38,6 +38,38 @@
     - name: Derive expected K3s agent server URL
       ansible.builtin.set_fact:
         k3s_agent_expected_server: "{{ k3s_agent_server_url | default(k3s_server_url) }}"
+        k3s_agent_expected_node_name: "{{ k3s_node_name | default(inventory_hostname) }}"
+
+    - name: Read current tailscale accept-dns setting
+      ansible.builtin.shell: |
+        set -o pipefail
+        tailscale debug prefs 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(str(d.get('CorpDNS', True)).lower())"
+      args:
+        executable: /bin/bash
+      register: k3s_agent_tailscale_corp_dns
+      changed_when: false
+      failed_when: false
+
+    - name: Read effective resolv.conf target when tailscale DNS is disabled
+      ansible.builtin.command: readlink -f /etc/resolv.conf
+      register: k3s_agent_resolv_conf_target
+      changed_when: false
+      when: not (edge_tailscale_accept_dns | default(true) | bool)
+
+    - name: Check cluster node registration via server kubeconfig
+      delegate_to: "{{ groups['edge_tencent'][0] }}"
+      ansible.builtin.command: >-
+        k3s kubectl get node {{ k3s_agent_expected_node_name }} --no-headers
+      register: k3s_agent_cluster_node
+      changed_when: false
+
+    - name: Read cluster node details when taints are expected
+      delegate_to: "{{ groups['edge_tencent'][0] }}"
+      ansible.builtin.command: >-
+        k3s kubectl describe node {{ k3s_agent_expected_node_name }}
+      register: k3s_agent_cluster_node_detail
+      changed_when: false
+      when: k3s_node_taints | default([]) | length > 0
 
     - name: Probe direct Tailscale path from agent to peer
       ansible.builtin.command: "tailscale ping -c 5 {{ tailscale_p2p_peer_ip }}"
@@ -56,18 +88,39 @@
         that:
           - k3s_agent_state.stdout == "active"
           - k3s_agent_configured_server.stdout | trim == k3s_agent_expected_server
+          - "' Ready ' in k3s_agent_cluster_node.stdout"
+          - (k3s_agent_tailscale_corp_dns.stdout | trim | lower) == ((edge_tailscale_accept_dns | default(true) | bool) | ternary('true', 'false'))
+          - (edge_tailscale_accept_dns | default(true) | bool) or (k3s_agent_resolv_conf_target.stdout | trim == '/run/systemd/resolve/stub-resolv.conf')
           - (not (tailscale_p2p_heal_enabled | default(false) | bool)) or (tailscale_p2p_probe.rc == 0)
           - (not (tailscale_p2p_heal_enabled | default(false) | bool)) or ("via DERP(" not in tailscale_p2p_probe.stdout)
         fail_msg: >-
           K3s agent 配置漂移：expected={{ k3s_agent_expected_server }}
           actual={{ k3s_agent_configured_server.stdout | trim }}
+          cluster_node={{ k3s_agent_cluster_node.stdout | trim }}
+          accept_dns_expected={{ (edge_tailscale_accept_dns | default(true) | bool) | ternary('true', 'false') }}
+          accept_dns_actual={{ k3s_agent_tailscale_corp_dns.stdout | trim | lower }}
+          resolv_conf_target={{ k3s_agent_resolv_conf_target.stdout | default('not-checked') | trim }}
           direct_probe={{ tailscale_p2p_probe.stdout | default('not-run') | trim }}
+
+    - name: Assert expected node taints are present
+      ansible.builtin.assert:
+        that:
+          - item in k3s_agent_cluster_node_detail.stdout
+        fail_msg: >-
+          K3s 节点 taint 缺失：node={{ k3s_agent_expected_node_name }}
+          expected={{ item }}
+      loop: "{{ k3s_node_taints | default([]) }}"
+      when: k3s_node_taints | default([]) | length > 0
 
     - name: Show K3s agent summary
       ansible.builtin.debug:
         msg:
           - "host={{ inventory_hostname }}"
+          - "k8s_node={{ k3s_agent_expected_node_name }}"
           - "k3s-agent={{ k3s_agent_state.stdout }}"
           - "tailscale_ip={{ k3s_agent_tailscale_ip.stdout_lines[0] | default('missing') }}"
           - "server={{ k3s_agent_configured_server.stdout | trim }}"
+          - "cluster_node={{ k3s_agent_cluster_node.stdout | trim }}"
+          - "tailscale_accept_dns={{ k3s_agent_tailscale_corp_dns.stdout | trim | lower }}"
+          - "resolv_conf_target={{ k3s_agent_resolv_conf_target.stdout | default('not-checked') | trim }}"
           - "tailscale_direct_probe={{ tailscale_p2p_probe.stdout | default('not-run') | trim }}"

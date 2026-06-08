@@ -18,9 +18,9 @@ else
     if [ -n "$STAGED_YAML" ]; then
         echo "Checking staged YAML files:"
         for f in $STAGED_YAML; do
-            if ! python3 -c "import yaml; yaml.safe_load(open('$f'))" 2>/dev/null; then
+            if ! python3 -c "import yaml; list(yaml.safe_load_all(open('$f')))" 2>/dev/null; then
                 echo "❌ YAML syntax error in $f"
-                echo "   Run: python3 -c 'import yaml; yaml.safe_load(open(\"$f\"))'"
+                echo "   Run: python3 -c 'import yaml; list(yaml.safe_load_all(open(\"$f\")))'"
             fi
         done
     fi

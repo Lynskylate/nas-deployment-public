@@ -1,0 +1,28 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: grafana
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      # FIX: endpoints now use cluster DNS + correct ports (the old host
+      # localhost:8428/8429/9428 were dead + ports mixed up after the
+      # Victoria stack migrated into K3s as headless services).
+      - name: VictoriaMetrics
+        type: prometheus
+        access: proxy
+        url: http://victoriametrics-victoria-metrics-single-server.monitoring.svc:8428
+        isDefault: true
+      - name: VictoriaLogs
+        type: victoriametrics-logs-datasource
+        access: proxy
+        url: http://victorialogs-victoria-logs-single-server.monitoring.svc:9428
+      - name: VictoriaTraces
+        type: jaeger
+        access: proxy
+        url: http://victoriatraces-vt-single-server.monitoring.svc:10428/select/jaeger

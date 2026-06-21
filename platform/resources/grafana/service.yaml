@@ -1,0 +1,23 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: grafana
+  annotations:
+    # Expose via the Tailscale operator. Explicit hostname keeps the existing
+    # https://grafana.tail414c32.ts.net URL. NOTE: the prior host-fronted
+    # "grafana" Tailscale node must be retired at cutover to free the name.
+    tailscale.com/expose: "true"
+    tailscale.com/hostname: "grafana"
+    tailscale.com/proxy-class: "gtr-only"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: grafana
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000

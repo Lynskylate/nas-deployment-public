@@ -1,0 +1,82 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vector-config
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: vector
+data:
+  vector.yaml: |
+    # Vector config (K3s DaemonSet) — collects network-monitor file logs +
+    # mihomo journald → VictoriaLogs via cluster DNS.
+    # Replaces the two ansible-deployed host Vector instances whose
+    # `localhost:8429` sink died when VictoriaLogs moved into K3s.
+    # NOTE: envoy access-log collection dropped per @lynskylate (2026-06-21).
+    data_dir: /var/lib/vector
+
+    sources:
+      network_monitor_logs:
+        type: file
+        include:
+          - /var/log/network-monitor/network-monitor.log
+        read_from: end
+        ignore_older_secs: 86400
+
+      mihomo_journal:
+        type: journald
+        journal_directory: /var/log/journal
+        include_units:
+          - mihomo.service
+
+    transforms:
+      parse_network_monitor_logs:
+        type: remap
+        inputs: [network_monitor_logs]
+        source: |
+          parsed = parse_json!(.message)
+          .host = get_hostname!()
+          .container_name = "network-monitor"
+          .site = parsed.site
+          .url = parsed.url
+          .status_code = parsed.status_code
+          .response_time = parsed.response_time
+          .proxy = parsed.proxy
+          .expected_route = parsed.expected_route
+          .category = parsed.category
+          .timestamp = if exists(parsed.timestamp) { parsed.timestamp } else { now() }
+          .route_type = if parsed.expected_route == "direct" { "domestic" } else { "international" }
+
+      mihomo_parse:
+        type: remap
+        inputs: [mihomo_journal]
+        source: |
+          .service = "mihomo"
+          .server = "gtr"
+          .env = "production"
+          .timestamp = parse_timestamp(.timestamp, "%Y-%m-%dT%H:%M:%S%.fZ") ??
+                       parse_timestamp(.__REALTIME_TIMESTAMP, "%s") ??
+                       now()
+          .log_level = "INFO"
+
+      mihomo_enriched:
+        type: remap
+        inputs: [mihomo_parse]
+        source: |
+          .host = get_hostname!()
+          .container_name = "mihomo"
+
+    sinks:
+      vlogs:
+        type: elasticsearch
+        inputs: [parse_network_monitor_logs, mihomo_enriched]
+        endpoints:
+          - http://victorialogs-victoria-logs-single-server.monitoring.svc:9428/insert/elasticsearch/
+        mode: bulk
+        api_version: v8
+        healthcheck:
+          enabled: false
+        query:
+          _msg_field: message
+          _time_field: timestamp
+          _stream_fields: host,container_name

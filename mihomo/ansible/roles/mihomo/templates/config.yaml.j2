@@ -18,6 +18,23 @@ geox-url:
   geosite: "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat"
   mmdb: "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.metadb"
 
+# Sniffer Configuration (improve traffic classification in TUN mode)
+sniffer:
+  enable: true
+  sniff:
+    HTTP:
+      ports: [80, 8080-8880]
+      override-destination: true
+    TLS:
+      ports: [443, 8443]
+      override-destination: true
+    QUIC:
+      ports: [443, 8443]
+      override-destination: true
+  skip-domain:
+    - "+.push.apple.com"
+    - "+.srv.nintendo.net"
+
 # TUN Configuration (for Tailscale exit node integration)
 tun:
   enable: true
@@ -46,6 +63,10 @@ dns:
   nameserver:
     - 1.1.1.1
     - 8.8.8.8
+  nameserver-policy:
+    "geosite:cn":
+      - "https://dns.alidns.com/dns-query"
+      - "https://doh.pub/dns-query"
   fallback:
     - 208.67.222.222
     - 208.67.220.220
@@ -329,11 +350,17 @@ rules:
 
   # Google services - use AI group (Gemini requires non-HK)
   - DOMAIN-SUFFIX,google.com,AI
+  - DOMAIN-SUFFIX,google,AI              # .google TLD (deepmind.google, ai.google 等)
   - DOMAIN-SUFFIX,googleapis.com,AI
   - DOMAIN-SUFFIX,googleusercontent.com,AI
   - DOMAIN-SUFFIX,gstatic.com,AI
+  - DOMAIN-SUFFIX,ggpht.com,AI           # Google 图片 CDN
   - DOMAIN-SUFFIX,googletagmanager.com,AI
+  - DOMAIN-SUFFIX,googletagservices.com,AI
+  - DOMAIN-SUFFIX,googlesyndication.com,AI
   - DOMAIN-SUFFIX,google-analytics.com,AI
+  - DOMAIN-SUFFIX,withgoogle.com,AI      # csp.withgoogle.com 等
+  - DOMAIN-SUFFIX,google.co,AI           # 地域重定向
 
   # Streaming services
   - DOMAIN-SUFFIX,youtube.com,Streaming

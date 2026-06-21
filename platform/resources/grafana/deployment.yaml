@@ -23,6 +23,9 @@ spec:
       containers:
         - name: grafana
           image: grafana/grafana:11.5.1
+          # Run as root: the data dir is a root-owned hostPath (uid 472 can't write).
+          securityContext:
+            runAsUser: 0
           ports:
             - containerPort: 3000
               name: http

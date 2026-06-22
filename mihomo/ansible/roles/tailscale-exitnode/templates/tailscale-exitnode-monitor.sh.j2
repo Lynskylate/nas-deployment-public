@@ -48,6 +48,26 @@ else
     }
 fi
 
+# --- Check & fix mihomo TUN auto-route chain (ip rule 9010) ---
+# mihomo's auto-route creates a chain: 9001→goto 9010→nop. If rule 9010 is
+# missing (e.g. after mihomo crash/restart without clean auto-route setup),
+# the chain becomes [unresolved] → exit-node return traffic fails → connections hang.
+# Fix: restart mihomo so it rebuilds the full auto-route chain.
+MIHOMO_CHAIN_OK=0
+if ${IP} rule show | grep -q "^9010:"; then
+    MIHOMO_CHAIN_OK=1
+else
+    logger -t exitnode-monitor "WARN: mihomo auto-route rule 9010 missing — restarting mihomo"
+    systemctl restart mihomo 2>/dev/null && sleep 3
+    if ${IP} rule show | grep -q "^9010:"; then
+        MIHOMO_CHAIN_OK=1
+        FIXES=$((FIXES + 1))
+        logger -t exitnode-monitor "FIXED: restarted mihomo, rule 9010 restored"
+    else
+        logger -t exitnode-monitor "FAIL: mihomo restart did not restore rule 9010"
+    fi
+fi
+
 # (Docker bridge MASQUERADE check removed 2026-06-07, Docker no longer on GTR)
 
 # --- Report Prometheus metrics ---
@@ -61,6 +81,9 @@ tailscale_exitnode_nft_masquerade_present{iface="${WAN}"} ${MASQ_OK}
 # HELP tailscale_exitnode_ip_rule_present 1 if Tailscale ip rule exists
 # TYPE tailscale_exitnode_ip_rule_present gauge
 tailscale_exitnode_ip_rule_present{source_cidr="${TAILSCALE_CIDR}",table="${ROUTE_TABLE}"} ${RULE_OK}
+# HELP tailscale_exitnode_mihomo_chain_present 1 if mihomo auto-route rule 9010 exists
+# TYPE tailscale_exitnode_mihomo_chain_present gauge
+tailscale_exitnode_mihomo_chain_present{rule="9010"} ${MIHOMO_CHAIN_OK}
 # HELP tailscale_exitnode_auto_fixes_total Number of auto-fixes applied this run
 # TYPE tailscale_exitnode_auto_fixes_total gauge
 tailscale_exitnode_auto_fixes_total ${FIXES}

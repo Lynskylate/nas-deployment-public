@@ -191,6 +191,7 @@ proxy-groups:
       - Auto-CN
       - Auto-Global
       - GitHub
+      - Google
       - AI
       - ShadowTLS
       - DIRECT
@@ -242,6 +243,16 @@ proxy-groups:
       - Hysteria2-Salamander
     url: https://www.google.com/generate_204
     interval: 30
+    lazy: false
+
+  # Google / Gemini 资源较多，使用 url-test 避免 fallback 固定命中首个存活节点
+  - name: "Google"
+    type: url-test
+    use:
+      - ai-nodes
+    url: https://accounts.google.com
+    interval: 30
+    tolerance: 50
     lazy: false
 
   # Streaming services
@@ -327,11 +338,11 @@ rules:
   - DOMAIN-SUFFIX,cursor.sh,AI
   - DOMAIN-SUFFIX,codeium.com,AI
   # Google Gemini / AI Studio
-  - DOMAIN-SUFFIX,gemini.google.com,AI
-  - DOMAIN-SUFFIX,generativelanguage.googleapis.com,AI
-  - DOMAIN-SUFFIX,ai.google.dev,AI
-  - DOMAIN-SUFFIX,aistudio.google.com,AI
-  - DOMAIN-SUFFIX,makersuite.google.com,AI
+  - DOMAIN-SUFFIX,gemini.google.com,Google
+  - DOMAIN-SUFFIX,generativelanguage.googleapis.com,Google
+  - DOMAIN-SUFFIX,ai.google.dev,Google
+  - DOMAIN-SUFFIX,aistudio.google.com,Google
+  - DOMAIN-SUFFIX,makersuite.google.com,Google
 
   # GitHub
   - DOMAIN-SUFFIX,github.com,GitHub
@@ -339,13 +350,13 @@ rules:
   - DOMAIN-SUFFIX,githubassets.com,GitHub
   - DOMAIN-SUFFIX,avatars.githubusercontent.com,GitHub
 
-  # Google services - use AI group (Gemini requires non-HK)
-  - DOMAIN-SUFFIX,google.com,AI
-  - DOMAIN-SUFFIX,googleapis.com,AI
-  - DOMAIN-SUFFIX,googleusercontent.com,AI
-  - DOMAIN-SUFFIX,gstatic.com,AI
-  - DOMAIN-SUFFIX,googletagmanager.com,AI
-  - DOMAIN-SUFFIX,google-analytics.com,AI
+  # Google services - use dedicated Google group for Gemini page assets
+  - DOMAIN-SUFFIX,google.com,Google
+  - DOMAIN-SUFFIX,googleapis.com,Google
+  - DOMAIN-SUFFIX,googleusercontent.com,Google
+  - DOMAIN-SUFFIX,gstatic.com,Google
+  - DOMAIN-SUFFIX,googletagmanager.com,Google
+  - DOMAIN-SUFFIX,google-analytics.com,Google
 
   # Streaming services
   - DOMAIN-SUFFIX,youtube.com,Streaming

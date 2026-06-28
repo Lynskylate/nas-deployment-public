@@ -39,13 +39,15 @@ dns:
   enable: true
   listen: {{ mihomo_dns_listen }}
   ipv6: {{ mihomo_dns_ipv6 | lower }}
-  enhanced-mode: fake-ip
+  enhanced-mode: {{ mihomo_enhanced_mode }}
+{% if mihomo_enhanced_mode == 'fake-ip' %}
   fake-ip-range: 198.18.0.1/16
   fake-ip-filter:
     - '*.ts.net'
     - '*.tailscale.com'
     - '+.msftconnecttest.com'
     - '+.msftncsi.com'
+{% endif %}
   default-nameserver:
     - 223.5.5.5
     - 1.1.1.1

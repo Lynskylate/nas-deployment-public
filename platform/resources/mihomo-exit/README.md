@@ -8,6 +8,7 @@
 - **Operator 只管入口**：`mihomo-api` Service 通过 Tailscale Operator 暴露
 - **exit node 不走 Operator Connector**：由 `StatefulSet` 中的独立 `tailscaled` 容器承载
 - **DNS 固定为 `redir-host`**：配合 tailnet 全局 DNS 切换，恢复域名级规则命中
+- **Tailscale 状态走 PVC**：显式关闭 `TS_KUBE_SECRET`，避免容器回写 Kubernetes Secret
 
 ## 目录内容
 

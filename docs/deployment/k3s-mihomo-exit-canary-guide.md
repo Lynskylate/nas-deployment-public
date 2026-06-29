@@ -134,6 +134,12 @@ k3s kubectl -n networking get pods
 k3s kubectl -n networking get svc
 ```
 
+实现细节说明：
+
+- `tailscale` 容器使用 PVC 持久化 `TS_STATE_DIR`
+- 清单中显式设置 `TS_KUBE_SECRET=""`，避免 `tailscale/tailscale` 在 Kubernetes 环境里默认尝试回写 `tailscale` Secret
+- 若省略该项，容器会因为缺少对应 Secret/RBAC 而持续重启
+
 ## 5. 获取 Canary 节点的 Tailscale IP
 
 部署完成后，需要知道新 exit node 在 tailnet 中的固定 IP，后续 tailnet 全局 DNS 要指向它：

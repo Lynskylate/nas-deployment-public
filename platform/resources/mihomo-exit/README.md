@@ -10,6 +10,7 @@
 - **DNS 固定为 `redir-host`**：配合 tailnet 全局 DNS 切换，恢复域名级规则命中
 - **Tailscale 状态走 PVC**：显式关闭 `TS_KUBE_SECRET`，避免容器回写 Kubernetes Secret
 - **Tailscale 版本固定**：当前钉在 `v1.96.5`，避免 `stable` 漂移带来 Kubernetes 启动语义变化
+- **注册凭据受 tailnet policy 约束**：若 `TS_AUTHKEY` 不能合法申请 `tag:k3s-exit-canary`，`tailscale up` 会直接失败
 
 ## 目录内容
 

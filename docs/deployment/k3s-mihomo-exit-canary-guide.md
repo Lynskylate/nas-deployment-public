@@ -22,7 +22,13 @@
 
 ### 2.1 Tailscale 节点注册凭据
 
-当前实现直接复用 vault 中的 `tailscale_operator_oauth_client_secret` 作为 `TS_AUTHKEY` 等价凭据。
+当前仓库里的 `sealedsecret-mihomo-exit-auth.yaml` 使用了 vault 中的 `tailscale_operator_oauth_client_secret`。
+
+但要注意：
+
+- 这类 OAuth 凭据在容器里仍然要求 `--advertise-tags`
+- 如果 tailnet policy / OAuth client 配置尚未允许 `tag:k3s-exit-canary`，启动时会报 `requested tags [...] are invalid or not permitted`
+- 若暂时不能调整 tailnet policy，应改为专门为 `tag:k3s-exit-canary` 生成的 tagged auth key，再重新封装为 SealedSecret
 
 ```bash
 TS_AUTHKEY=$(sops --decrypt /mnt/z/workspace/nas-deployment-vault/infra/tailscale-operator/oauth.sops.yml | \

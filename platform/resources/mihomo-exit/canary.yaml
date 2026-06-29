@@ -517,7 +517,7 @@ spec:
       terminationGracePeriodSeconds: 20
       initContainers:
         - name: init-network
-          image: tailscale/tailscale:stable
+          image: tailscale/tailscale:v1.96.5
           command:
             - /bin/sh
             - -ec
@@ -531,7 +531,7 @@ spec:
             - name: mihomo-data
               mountPath: /var/lib/mihomo
         - name: render-mihomo-config
-          image: tailscale/tailscale:stable
+          image: tailscale/tailscale:v1.96.5
           command:
             - /bin/sh
             - /scripts/render-mihomo-config.sh
@@ -577,7 +577,7 @@ spec:
               mountPath: /var/lib/mihomo
       containers:
         - name: tailscale
-          image: tailscale/tailscale:stable
+          image: tailscale/tailscale:v1.96.5
           env:
             - name: TS_AUTHKEY
               valueFrom:
@@ -618,7 +618,7 @@ spec:
             - name: tailscale-run
               mountPath: /tmp
         - name: route-controller
-          image: tailscale/tailscale:stable
+          image: tailscale/tailscale:v1.96.5
           command:
             - /bin/sh
             - /scripts/route-controller.sh

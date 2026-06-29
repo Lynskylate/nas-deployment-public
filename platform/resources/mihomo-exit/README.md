@@ -9,6 +9,7 @@
 - **exit node 不走 Operator Connector**：由 `StatefulSet` 中的独立 `tailscaled` 容器承载
 - **DNS 固定为 `redir-host`**：配合 tailnet 全局 DNS 切换，恢复域名级规则命中
 - **Tailscale 状态走 PVC**：显式关闭 `TS_KUBE_SECRET`，避免容器回写 Kubernetes Secret
+- **Tailscale 版本固定**：当前钉在 `v1.96.5`，避免 `stable` 漂移带来 Kubernetes 启动语义变化
 
 ## 目录内容
 

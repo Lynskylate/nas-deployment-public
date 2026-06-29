@@ -236,6 +236,8 @@ proxy-groups:
     lazy: false
 
   # AI services - 不做链式路由，保持简单 fallback
+  # 健康检查用 chatgpt.com 而非 google.com：ChatGPT Cloudflare 会屏蔽数据中心 IP，
+  # google 健康检查通过不代表能访问 OpenAI，导致 fallback 全组 retry
   - name: "AI"
     type: fallback
     use:
@@ -243,8 +245,8 @@ proxy-groups:
     proxies:
       - Hysteria2-Remote
       - Hysteria2-Salamander
-    url: https://www.google.com/generate_204
-    interval: 30
+    url: https://chatgpt.com/
+    interval: 60
     lazy: false
 
   # Google / Gemini — fallback 模式：节点健康检查失败时自动切换（捕获 GFW TLS RST）
@@ -319,7 +321,9 @@ rules:
   # AI services - use AI group (US/SG/UK/DE nodes, avoid HK)
   - DOMAIN-SUFFIX,openai.com,AI
   - DOMAIN-SUFFIX,chatgpt.com,AI
+  - DOMAIN-SUFFIX,chat.openai.com,AI
   - DOMAIN-SUFFIX,oaistatic.com,AI
+  - DOMAIN-SUFFIX,oaiusercontent.com,AI
   - DOMAIN-SUFFIX,auth0.com,AI
   - DOMAIN-SUFFIX,client-api.ark.io,AI
   - DOMAIN-SUFFIX,anthropic.com,AI

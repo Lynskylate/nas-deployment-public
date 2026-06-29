@@ -1,0 +1,719 @@
+# Mihomo Exit Canary
+# 说明：
+# 1. 本目录不会提交任何明文凭据。
+# 2. 真实的 SealedSecret 需要按 README / 部署文档生成后放在同目录。
+# 3. 该 Canary 与宿主机版 GTR Mihomo / exit node 并行运行，不替换现网。
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: networking
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mihomo-exit-scripts
+  namespace: networking
+data:
+  render-mihomo-config.sh: |
+    #!/bin/sh
+    set -eu
+
+    CONFIG_DIR=/var/lib/mihomo
+    mkdir -p "${CONFIG_DIR}/providers" "${CONFIG_DIR}/ui"
+
+    cat > "${CONFIG_DIR}/config.yaml" <<EOF
+    mixed-port: 7890
+    mode: rule
+    log-level: info
+    allow-lan: true
+    bind-address: "*"
+    ipv6: true
+    external-controller: 0.0.0.0:9090
+    external-ui: ui
+    secret: "${MIHOMO_API_SECRET}"
+    geodata-mode: true
+    geox-url:
+      geoip: "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.dat"
+      geosite: "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat"
+      mmdb: "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.metadb"
+
+    tun:
+      enable: true
+      stack: mixed
+      auto-route: true
+      auto-detect-interface: true
+      dns-hijack:
+        - any:53
+        - tcp://any:53
+      route-exclude-address:
+        - 10.60.0.0/16
+        - 10.61.0.0/16
+        - 100.64.0.0/10
+        - 192.168.0.0/16
+        - 172.16.0.0/12
+        - "::/0"
+
+    dns:
+      enable: true
+      listen: 0.0.0.0:53
+      ipv6: true
+      enhanced-mode: redir-host
+      default-nameserver:
+        - 223.5.5.5
+        - 1.1.1.1
+      nameserver:
+        - 1.1.1.1
+        - 8.8.8.8
+      fallback:
+        - 208.67.222.222
+        - 208.67.220.220
+      fallback-filter:
+        geoip: true
+        geoip-code: CN
+      nameserver-policy:
+        "+.microsoft.com": [1.1.1.1, 8.8.8.8]
+        "+.msftconnecttest.com": [223.5.5.5]
+        "+.msftncsi.com": [223.5.5.5]
+        "+.delivery.microsoft.com": [1.1.1.1, 8.8.8.8]
+        "+.mp.microsoft.com": [1.1.1.1, 8.8.8.8]
+
+    proxy-providers:
+      subscription:
+        type: http
+        url: "${PROXY_PROVIDER_URL}"
+        path: ./providers/subscription.yaml
+        interval: 3600
+        health-check:
+          enable: true
+          url: https://www.gstatic.com/generate_204
+          interval: 60
+        filter: ''
+
+      ai-nodes:
+        type: http
+        url: "${PROXY_PROVIDER_URL}"
+        path: ./providers/ai-nodes.yaml
+        interval: 3600
+        health-check:
+          enable: true
+          url: https://www.google.com/generate_204
+          interval: 30
+        filter: '美国|US|United States|英国|UK|Britain|德国|DE|Germany'
+
+    proxies:
+      - name: "ShadowTLS-Remote"
+        type: ss
+        server: 66.154.100.187
+        port: 443
+        cipher: aes-256-gcm
+        password: "${SHADOWSOCKS_PASSWORD}"
+        plugin: shadow-tls
+        plugin-opts:
+          host: www.microsoft.com
+          password: "${SHADOWTLS_PASSWORD}"
+          version: 3
+
+      - name: "Hysteria2-Remote"
+        type: hysteria2
+        server: 66.154.100.187
+        port: 8443
+        password: "${HYSTERIA2_PASSWORD}"
+        sni: bing.com
+        skip-cert-verify: true
+        up: "100 mbps"
+        down: "100 mbps"
+
+      - name: "Hysteria2-Salamander"
+        type: hysteria2
+        server: 66.154.100.187
+        port: 12345
+        password: "${HYSTERIA2_PASSWORD}"
+        sni: bing.com
+        skip-cert-verify: true
+        up: "100 mbps"
+        down: "100 mbps"
+        obfs: salamander
+        obfs-password: "${HYSTERIA2_SAL_OBFS_PASSWORD}"
+
+    proxy-groups:
+      - name: "General"
+        type: fallback
+        proxies:
+          - Auto-via-Hy2Sal
+          - Auto-via-Hy2
+          - Auto-via-STLS
+          - Auto
+          - DIRECT
+        url: https://cp.cloudflare.com/generate_204
+        interval: 30
+        lazy: false
+
+      - name: "Auto-via-Hy2Sal"
+        type: url-test
+        dialer-proxy: "Hysteria2-Salamander"
+        use:
+          - subscription
+        url: https://cp.cloudflare.com/generate_204
+        interval: 60
+        tolerance: 100
+        lazy: false
+
+      - name: "Auto-via-Hy2"
+        type: url-test
+        dialer-proxy: "Hysteria2-Remote"
+        use:
+          - subscription
+        url: https://cp.cloudflare.com/generate_204
+        interval: 60
+        tolerance: 100
+        lazy: false
+
+      - name: "Auto-via-STLS"
+        type: url-test
+        dialer-proxy: "ShadowTLS-Remote"
+        use:
+          - subscription
+        url: https://cp.cloudflare.com/generate_204
+        interval: 60
+        tolerance: 100
+        lazy: false
+
+      - name: "Proxy"
+        type: select
+        use:
+          - subscription
+        proxies:
+          - General
+          - Auto-via-Hy2Sal
+          - Auto-via-Hy2
+          - Auto-via-STLS
+          - Hysteria2-Salamander
+          - Hysteria2-Remote
+          - Auto
+          - Auto-CN
+          - Auto-Global
+          - GitHub
+          - Google
+          - AI
+          - ShadowTLS
+          - DIRECT
+        url: https://cp.cloudflare.com/generate_204
+
+      - name: "Auto"
+        type: url-test
+        use:
+          - subscription
+        url: https://cp.cloudflare.com/generate_204
+        interval: 60
+        tolerance: 50
+        lazy: false
+
+      - name: "Auto-CN"
+        type: select
+        proxies:
+          - DIRECT
+
+      - name: "Auto-Global"
+        type: url-test
+        use:
+          - subscription
+        url: https://www.google.com/generate_204
+        interval: 60
+        tolerance: 50
+        lazy: false
+
+      - name: "GitHub"
+        type: url-test
+        use:
+          - subscription
+        url: https://api.github.com
+        interval: 60
+        tolerance: 50
+        lazy: false
+
+      - name: "AI"
+        type: fallback
+        use:
+          - ai-nodes
+        proxies:
+          - Hysteria2-Remote
+          - Hysteria2-Salamander
+        url: https://chatgpt.com/
+        interval: 60
+        lazy: false
+
+      - name: "Google"
+        type: fallback
+        use:
+          - ai-nodes
+        url: https://www.google.com/generate_204
+        interval: 30
+        lazy: false
+
+      - name: "Streaming"
+        type: url-test
+        use:
+          - subscription
+        url: https://www.youtube.com/generate_204
+        interval: 60
+        tolerance: 50
+        lazy: false
+
+      - name: "Telegram"
+        type: url-test
+        use:
+          - subscription
+        url: https://core.telegram.org/getProxyConfig
+        interval: 60
+        tolerance: 50
+        lazy: false
+
+      - name: "ShadowTLS"
+        type: select
+        proxies:
+          - Hysteria2-Salamander
+          - Hysteria2-Remote
+          - ShadowTLS-Remote
+          - DIRECT
+
+      - name: "AdBlock"
+        type: select
+        proxies:
+          - REJECT
+          - DIRECT
+
+    rules:
+      - DOMAIN-SUFFIX,ts.net,DIRECT
+      - DOMAIN-SUFFIX,tailscale.com,DIRECT
+      - DOMAIN-SUFFIX,tail414c32.ts.net,DIRECT
+      - IP-CIDR,100.64.0.0/10,DIRECT
+      - IP-CIDR6,fd7a:115c:a1e0::/48,DIRECT
+
+      - DOMAIN-SUFFIX,local,DIRECT
+      - IP-CIDR,127.0.0.0/8,DIRECT
+      - IP-CIDR,172.16.0.0/12,DIRECT
+      - IP-CIDR,192.168.0.0/16,DIRECT
+      - IP-CIDR,10.0.0.0/8,DIRECT
+      - IP-CIDR,17.0.0.0/8,DIRECT
+      - IP-CIDR6,::1/128,DIRECT
+      - IP-CIDR6,fc00::/7,DIRECT
+      - IP-CIDR6,fe80::/10,DIRECT
+
+      - DOMAIN-SUFFIX,deepseek.com,DIRECT
+      - DOMAIN-SUFFIX,packyapi.com,DIRECT
+
+      - DOMAIN-SUFFIX,openai.com,AI
+      - DOMAIN-SUFFIX,chatgpt.com,AI
+      - DOMAIN-SUFFIX,chat.openai.com,AI
+      - DOMAIN-SUFFIX,oaistatic.com,AI
+      - DOMAIN-SUFFIX,oaiusercontent.com,AI
+      - DOMAIN-SUFFIX,auth0.com,AI
+      - DOMAIN-SUFFIX,client-api.ark.io,AI
+      - DOMAIN-SUFFIX,anthropic.com,AI
+      - DOMAIN-SUFFIX,claude.ai,AI
+      - DOMAIN-SUFFIX,anthropic-internal-api.com,AI
+      - DOMAIN-SUFFIX,perplexity.ai,AI
+      - DOMAIN-SUFFIX,pplx.io,AI
+      - DOMAIN-SUFFIX,poe.com,AI
+      - DOMAIN-SUFFIX,character.ai,AI
+      - DOMAIN-SUFFIX,midjourney.com,AI
+      - DOMAIN-SUFFIX,discord.com,AI
+      - DOMAIN-SUFFIX,huggingface.co,AI
+      - DOMAIN-SUFFIX,replicate.com,AI
+      - DOMAIN-SUFFIX,runpod.io,AI
+      - DOMAIN-SUFFIX,deepmind.com,AI
+      - DOMAIN-SUFFIX,cohere.com,AI
+      - DOMAIN-SUFFIX,cursor.sh,AI
+      - DOMAIN-SUFFIX,codeium.com,AI
+      - DOMAIN-SUFFIX,gemini.google.com,Google
+      - DOMAIN-SUFFIX,generativelanguage.googleapis.com,Google
+      - DOMAIN-SUFFIX,ai.google.dev,Google
+      - DOMAIN-SUFFIX,aistudio.google.com,Google
+      - DOMAIN-SUFFIX,makersuite.google.com,Google
+
+      - DOMAIN-SUFFIX,github.com,GitHub
+      - DOMAIN-SUFFIX,githubusercontent.com,GitHub
+      - DOMAIN-SUFFIX,githubassets.com,GitHub
+      - DOMAIN-SUFFIX,avatars.githubusercontent.com,GitHub
+
+      - DOMAIN-SUFFIX,google.com,Google
+      - DOMAIN-SUFFIX,googleapis.com,Google
+      - DOMAIN-SUFFIX,googleusercontent.com,Google
+      - DOMAIN-SUFFIX,gstatic.com,Google
+      - DOMAIN-SUFFIX,googletagmanager.com,Google
+      - DOMAIN-SUFFIX,google-analytics.com,Google
+
+      - DOMAIN-SUFFIX,youtube.com,Streaming
+      - DOMAIN-SUFFIX,ytimg.com,Streaming
+      - DOMAIN-SUFFIX,googlevideo.com,Streaming
+      - DOMAIN-SUFFIX,netflix.com,Streaming
+      - DOMAIN-SUFFIX,nflxvideo.net,Streaming
+      - DOMAIN-SUFFIX,disney.com,Streaming
+      - DOMAIN-SUFFIX,disneyplus.com,Streaming
+      - DOMAIN-SUFFIX,disney-plus.com,Streaming
+      - DOMAIN-SUFFIX,hulu.com,Streaming
+      - DOMAIN-SUFFIX,hbomax.com,Streaming
+      - DOMAIN-SUFFIX,primevideo.com,Streaming
+      - DOMAIN-SUFFIX,twitch.tv,Streaming
+
+      - DOMAIN-SUFFIX,telegram.org,General
+      - DOMAIN-SUFFIX,t.me,General
+      - DOMAIN-SUFFIX,tdesktop.com,General
+      - IP-CIDR,91.108.0.0/16,General
+      - IP-CIDR,109.239.140.0/24,General
+      - IP-CIDR,149.154.160.0/20,General
+
+      - DOMAIN-SUFFIX,dl.delivery.mp.microsoft.com,Auto-Global
+      - DOMAIN-SUFFIX,displaycatalog.mp.microsoft.com,Auto-Global
+      - DOMAIN-SUFFIX,store-images.s-microsoft.com,Auto-Global
+
+      - DOMAIN-SUFFIX,microsoft.com,General
+      - DOMAIN-SUFFIX,office.com,General
+      - DOMAIN-SUFFIX,skype.com,General
+      - DOMAIN-SUFFIX,linkedin.com,General
+
+      - DOMAIN-SUFFIX,apple.com,General
+      - DOMAIN-SUFFIX,icloud.com,General
+      - DOMAIN-SUFFIX,cdn-apple.com,General
+
+      - DOMAIN-SUFFIX,twitter.com,General
+      - DOMAIN-SUFFIX,x.com,General
+      - DOMAIN-SUFFIX,facebook.com,General
+      - DOMAIN-SUFFIX,instagram.com,General
+      - DOMAIN-SUFFIX,tiktok.com,General
+      - DOMAIN-SUFFIX,tiktokcdn.com,General
+
+      - DOMAIN-SUFFIX,stackoverflow.com,General
+      - DOMAIN-SUFFIX,cloudflare.com,General
+      - DOMAIN-SUFFIX,docker.com,General
+
+      - DOMAIN-SUFFIX,cn,Auto-CN
+      - DOMAIN-KEYWORD,baidu,Auto-CN
+      - DOMAIN-KEYWORD,taobao,Auto-CN
+      - DOMAIN-KEYWORD,alipay,Auto-CN
+      - DOMAIN-KEYWORD,tmall,Auto-CN
+      - DOMAIN-KEYWORD,jd.com,Auto-CN
+      - DOMAIN-KEYWORD,bilibili,Auto-CN
+      - DOMAIN-KEYWORD,netease,Auto-CN
+      - DOMAIN-KEYWORD,qq,Auto-CN
+      - DOMAIN-KEYWORD,weixin,Auto-CN
+      - GEOIP,CN,Auto-CN
+
+      - MATCH,General
+    EOF
+
+    cat > "${CONFIG_DIR}/ui/index.html" <<'EOF'
+    <!doctype html>
+    <html lang="zh-CN">
+    <head>
+      <meta charset="utf-8">
+      <title>Mihomo Exit Canary</title>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>
+        body { font-family: system-ui, sans-serif; margin: 2rem; line-height: 1.6; }
+        code { background: #f3f4f6; padding: 0.1rem 0.35rem; border-radius: 0.25rem; }
+      </style>
+    </head>
+    <body>
+      <h1>Mihomo Exit Canary</h1>
+      <p>该控制面由 K3s 中的 Mihomo Canary 实例提供。</p>
+      <p>常用 API：</p>
+      <ul>
+        <li><code>/version</code></li>
+        <li><code>/traffic</code></li>
+        <li><code>/connections</code></li>
+        <li><code>/proxies</code></li>
+      </ul>
+      <p>访问 API 时请携带 <code>Authorization: Bearer &lt;MIHOMO_API_SECRET&gt;</code>。</p>
+    </body>
+    </html>
+    EOF
+  route-controller.sh: |
+    #!/bin/sh
+    set -eu
+
+    RULE='from 100.64.0.0/10 lookup 2022'
+
+    echo "route-controller: waiting for Mihomo route table 2022"
+    while true; do
+      if ip route show table 2022 2>/dev/null | grep -q .; then
+        if ! ip rule show | grep -q "${RULE}"; then
+          echo "route-controller: installing ${RULE} priority 1000"
+          ip rule add from 100.64.0.0/10 lookup 2022 priority 1000
+        fi
+      fi
+      sleep 15
+    done
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mihomo-exit-canary
+  namespace: networking
+  labels:
+    app: mihomo-exit-canary
+spec:
+  clusterIP: None
+  selector:
+    app: mihomo-exit-canary
+  ports:
+    - name: dns-udp
+      port: 53
+      targetPort: dns-udp
+      protocol: UDP
+    - name: dns-tcp
+      port: 53
+      targetPort: dns-tcp
+      protocol: TCP
+    - name: mixed
+      port: 7890
+      targetPort: mixed
+      protocol: TCP
+    - name: controller
+      port: 9090
+      targetPort: controller
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mihomo-api
+  namespace: networking
+  labels:
+    app: mihomo-exit-canary
+  annotations:
+    tailscale.com/expose: "true"
+    tailscale.com/proxy-class: gtr-only
+spec:
+  selector:
+    app: mihomo-exit-canary
+  ports:
+    - name: http
+      port: 9090
+      targetPort: controller
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mihomo-exit-canary
+  namespace: networking
+  labels:
+    app: mihomo-exit-canary
+spec:
+  serviceName: mihomo-exit-canary
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mihomo-exit-canary
+  template:
+    metadata:
+      labels:
+        app: mihomo-exit-canary
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: gtr
+      terminationGracePeriodSeconds: 20
+      initContainers:
+        - name: init-network
+          image: tailscale/tailscale:stable
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              sysctl -w net.ipv4.ip_forward=1
+              sysctl -w net.ipv6.conf.all.forwarding=1 || true
+              mkdir -p /var/lib/mihomo/providers /var/lib/mihomo/ui
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: mihomo-data
+              mountPath: /var/lib/mihomo
+        - name: render-mihomo-config
+          image: tailscale/tailscale:stable
+          command:
+            - /bin/sh
+            - /scripts/render-mihomo-config.sh
+          env:
+            - name: MIHOMO_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mihomo-exit-api
+                  key: MIHOMO_API_SECRET
+            - name: PROXY_PROVIDER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: mihomo-exit-providers
+                  key: PROXY_PROVIDER_URL
+            - name: SHADOWSOCKS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mihomo-exit-providers
+                  key: SHADOWSOCKS_PASSWORD
+            - name: SHADOWTLS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mihomo-exit-providers
+                  key: SHADOWTLS_PASSWORD
+            - name: HYSTERIA2_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mihomo-exit-providers
+                  key: HYSTERIA2_PASSWORD
+            - name: HYSTERIA2_SAL_OBFS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mihomo-exit-providers
+                  key: HYSTERIA2_SAL_OBFS_PASSWORD
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsUser: 0
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: mihomo-data
+              mountPath: /var/lib/mihomo
+      containers:
+        - name: tailscale
+          image: tailscale/tailscale:stable
+          env:
+            - name: TS_AUTHKEY
+              valueFrom:
+                secretKeyRef:
+                  name: mihomo-exit-auth
+                  key: TS_AUTHKEY
+            - name: TS_STATE_DIR
+              value: /var/lib/tailscale
+            - name: TS_HOSTNAME
+              value: k3s-mihomo-exit-canary
+            - name: TS_AUTH_ONCE
+              value: "true"
+            - name: TS_USERSPACE
+              value: "false"
+            - name: TS_ACCEPT_DNS
+              value: "false"
+            - name: TS_EXTRA_ARGS
+              value: --advertise-exit-node --advertise-tags=tag:k3s-exit-canary
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              add: ["NET_ADMIN", "NET_RAW"]
+            runAsUser: 0
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          volumeMounts:
+            - name: dev-net-tun
+              mountPath: /dev/net/tun
+            - name: tailscale-state
+              mountPath: /var/lib/tailscale
+            - name: tailscale-run
+              mountPath: /tmp
+        - name: route-controller
+          image: tailscale/tailscale:stable
+          command:
+            - /bin/sh
+            - /scripts/route-controller.sh
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              add: ["NET_ADMIN", "NET_RAW"]
+            runAsUser: 0
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+        - name: mihomo
+          image: metacubex/mihomo:v1.19.20
+          args:
+            - -d
+            - /var/lib/mihomo
+            - -f
+            - /var/lib/mihomo/config.yaml
+          ports:
+            - name: dns-udp
+              containerPort: 53
+              protocol: UDP
+            - name: dns-tcp
+              containerPort: 53
+              protocol: TCP
+            - name: mixed
+              containerPort: 7890
+              protocol: TCP
+            - name: controller
+              containerPort: 9090
+              protocol: TCP
+          startupProbe:
+            tcpSocket:
+              port: controller
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket:
+              port: controller
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            tcpSocket:
+              port: controller
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              add: ["NET_ADMIN", "NET_RAW"]
+            runAsUser: 0
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+          volumeMounts:
+            - name: dev-net-tun
+              mountPath: /dev/net/tun
+            - name: mihomo-data
+              mountPath: /var/lib/mihomo
+      volumes:
+        - name: dev-net-tun
+          hostPath:
+            path: /dev/net/tun
+            type: CharDevice
+        - name: scripts
+          configMap:
+            name: mihomo-exit-scripts
+            defaultMode: 0555
+        - name: tailscale-run
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: tailscale-state
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 256Mi
+    - metadata:
+        name: mihomo-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 1Gi

@@ -66,6 +66,7 @@ dns:
     "+.msftncsi.com": [223.5.5.5]
     "+.delivery.microsoft.com": [1.1.1.1, 8.8.8.8]
     "+.mp.microsoft.com": [1.1.1.1, 8.8.8.8]
+    "+.v51124-5.qpon": ["tcp://47.104.208.14:8080"]
 
 # Proxy Providers
 proxy-providers:
@@ -87,7 +88,7 @@ proxy-providers:
     interval: 3600
     health-check:
       enable: true
-      url: https://www.google.com/generate_204
+      url: https://cp.cloudflare.com/generate_204
       interval: 30
     filter: '美国|US|United States|英国|UK|Britain|德国|DE|Germany'
 

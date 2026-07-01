@@ -192,22 +192,24 @@ data:
           - DIRECT
 
       - name: "Auto-Global"
-        type: url-test
+        type: fallback
         use:
           - subscription
+        proxies:
+          - Hysteria2-Remote
+          - Hysteria2-Salamander
         url: https://www.google.com/generate_204
         interval: 60
-        tolerance: 50
-        lazy: false
 
       - name: "GitHub"
-        type: url-test
+        type: fallback
         use:
           - subscription
+        proxies:
+          - Hysteria2-Remote
+          - Hysteria2-Salamander
         url: https://api.github.com
         interval: 60
-        tolerance: 50
-        lazy: false
 
       - name: "AI"
         type: fallback
@@ -224,27 +226,31 @@ data:
         type: fallback
         use:
           - ai-nodes
+        proxies:
+          - Hysteria2-Remote
+          - Hysteria2-Salamander
         url: https://www.google.com/generate_204
-        interval: 30
-        lazy: false
+        interval: 60
 
       - name: "Streaming"
-        type: url-test
+        type: fallback
         use:
           - subscription
+        proxies:
+          - Hysteria2-Remote
+          - Hysteria2-Salamander
         url: https://www.youtube.com/generate_204
         interval: 60
-        tolerance: 50
-        lazy: false
 
       - name: "Telegram"
-        type: url-test
+        type: fallback
         use:
           - subscription
+        proxies:
+          - Hysteria2-Remote
+          - Hysteria2-Salamander
         url: https://core.telegram.org/getProxyConfig
         interval: 60
-        tolerance: 50
-        lazy: false
 
       - name: "SelfHost"
         type: select

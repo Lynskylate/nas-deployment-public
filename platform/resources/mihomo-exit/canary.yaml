@@ -103,18 +103,6 @@ data:
         filter: '美国|US|United States|英国|UK|Britain|德国|DE|Germany'
 
     proxies:
-      - name: "ShadowTLS-Remote"
-        type: ss
-        server: 66.154.100.187
-        port: 443
-        cipher: aes-256-gcm
-        password: "${SHADOWSOCKS_PASSWORD}"
-        plugin: shadow-tls
-        plugin-opts:
-          host: www.microsoft.com
-          password: "${SHADOWTLS_PASSWORD}"
-          version: 3
-
       - name: "Hysteria2-Remote"
         type: hysteria2
         server: 66.154.100.187
@@ -143,7 +131,6 @@ data:
         proxies:
           - Auto-via-Hy2Sal
           - Auto-via-Hy2
-          - Auto-via-STLS
           - Auto
           - DIRECT
         url: https://cp.cloudflare.com/generate_204
@@ -170,16 +157,6 @@ data:
         tolerance: 100
         lazy: false
 
-      - name: "Auto-via-STLS"
-        type: url-test
-        dialer-proxy: "ShadowTLS-Remote"
-        use:
-          - subscription
-        url: https://cp.cloudflare.com/generate_204
-        interval: 60
-        tolerance: 100
-        lazy: false
-
       - name: "Proxy"
         type: select
         use:
@@ -188,7 +165,6 @@ data:
           - General
           - Auto-via-Hy2Sal
           - Auto-via-Hy2
-          - Auto-via-STLS
           - Hysteria2-Salamander
           - Hysteria2-Remote
           - Auto
@@ -197,7 +173,7 @@ data:
           - GitHub
           - Google
           - AI
-          - ShadowTLS
+          - SelfHost
           - DIRECT
         url: https://cp.cloudflare.com/generate_204
 
@@ -270,12 +246,11 @@ data:
         tolerance: 50
         lazy: false
 
-      - name: "ShadowTLS"
+      - name: "SelfHost"
         type: select
         proxies:
           - Hysteria2-Salamander
           - Hysteria2-Remote
-          - ShadowTLS-Remote
           - DIRECT
 
       - name: "AdBlock"
@@ -547,16 +522,6 @@ spec:
                 secretKeyRef:
                   name: mihomo-exit-providers
                   key: PROXY_PROVIDER_URL
-            - name: SHADOWSOCKS_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: mihomo-exit-providers
-                  key: SHADOWSOCKS_PASSWORD
-            - name: SHADOWTLS_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: mihomo-exit-providers
-                  key: SHADOWTLS_PASSWORD
             - name: HYSTERIA2_PASSWORD
               valueFrom:
                 secretKeyRef:

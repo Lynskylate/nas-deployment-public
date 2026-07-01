@@ -16,12 +16,6 @@ mihomo_home_path: "/var/lib/mihomo"
 # Proxy provider configuration
 proxy_provider_interval: 3600
 
-# ShadowTLS proxy configuration
-shadowtls_server: "66.154.100.187"
-shadowtls_port: 443
-shadowtls_sni: "www.microsoft.com"
-shadowsocks_method: "aes-256-gcm"
-
 # Hysteria2 proxy configuration
 hysteria2_server: "66.154.100.187"
 hysteria2_port: 8443

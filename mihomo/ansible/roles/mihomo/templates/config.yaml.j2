@@ -94,18 +94,6 @@ proxy-providers:
 
 # Proxies
 proxies:
-  - name: "ShadowTLS-Remote"
-    type: ss
-    server: {{ shadowtls_server }}
-    port: {{ shadowtls_port }}
-    cipher: {{ shadowsocks_method }}
-    password: {{ shadowsocks_password }}
-    plugin: shadow-tls
-    plugin-opts:
-      host: {{ shadowtls_sni }}
-      password: {{ shadowtls_password }}
-      version: 3
-
   - name: "Hysteria2-Remote"
     type: hysteria2
     server: {{ hysteria2_server }}
@@ -138,7 +126,6 @@ proxy-groups:
     proxies:
       - Auto-via-Hy2Sal
       - Auto-via-Hy2
-      - Auto-via-STLS
       - Auto
       - DIRECT
     url: https://cp.cloudflare.com/generate_204
@@ -166,16 +153,6 @@ proxy-groups:
     tolerance: 100
     lazy: false
 
-  - name: "Auto-via-STLS"
-    type: url-test
-    dialer-proxy: "ShadowTLS-Remote"
-    use:
-      - subscription
-    url: https://cp.cloudflare.com/generate_204
-    interval: 60
-    tolerance: 100
-    lazy: false
-
   # ─── 基础选择组 ───
 
   # 手动选择入口
@@ -187,7 +164,6 @@ proxy-groups:
       - General
       - Auto-via-Hy2Sal
       - Auto-via-Hy2
-      - Auto-via-STLS
       - Hysteria2-Salamander
       - Hysteria2-Remote
       - Auto
@@ -196,7 +172,7 @@ proxy-groups:
       - GitHub
       - Google
       - AI
-      - ShadowTLS
+      - SelfHost
       - DIRECT
     url: https://cp.cloudflare.com/generate_204
 
@@ -279,13 +255,12 @@ proxy-groups:
     tolerance: 50
     lazy: false
 
-  # Direct proxy group (select between ShadowTLS/Hysteria2/DIRECT)
-  - name: "ShadowTLS"
+  # 自建节点直选 (Hysteria2/DIRECT)
+  - name: "SelfHost"
     type: select
     proxies:
       - Hysteria2-Salamander
       - Hysteria2-Remote
-      - ShadowTLS-Remote
       - DIRECT
 
   # Ads blocking

@@ -155,6 +155,7 @@
       - "/{{ raft_computer_project }}"
       - --machine
       - "{{ raft_computer_machine }}"
+      - --yes
   become: true
   become_user: "{{ gtr_ai_user }}"
   environment:

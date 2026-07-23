@@ -3,11 +3,12 @@
   ansible.builtin.assert:
     that:
       - gtr_ai_user is defined
-      - slock_ai_server_url is defined
-      - slock_ai_api_key is defined
-      - slock_ai_api_key | length > 0
-    fail_msg: "gtr-ai-tools requires gtr_ai_user and slock_ai_api_key"
-  no_log: true
+      - raft_computer_install_url is defined
+      - raft_computer_project is defined
+      - raft_computer_project | length > 0
+      - raft_computer_machine is defined
+      - raft_computer_machine | length > 0
+    fail_msg: "gtr-ai-tools requires gtr_ai_user and Raft Computer connection settings"
 
 - name: Gather target AI user passwd entry
   ansible.builtin.getent:
@@ -102,77 +103,70 @@
     name: "user@{{ gtr_ai_user_uid }}.service"
     state: started
 
-- name: Ensure Slock config directory exists
-  ansible.builtin.file:
-    path: "{{ slock_ai_config_dir }}"
-    state: directory
-    owner: "{{ gtr_ai_user }}"
-    group: "{{ gtr_ai_user }}"
-    mode: "0700"
-
-- name: Deploy Slock daemon environment
-  ansible.builtin.template:
-    src: slock-ai-daemon.env.j2
-    dest: "{{ slock_ai_env_file }}"
-    owner: "{{ gtr_ai_user }}"
-    group: "{{ gtr_ai_user }}"
-    mode: "0600"
-  no_log: true
-
-- name: Deploy Slock user systemd service
-  ansible.builtin.template:
-    src: slock-ai-daemon.service.j2
-    dest: "{{ gtr_ai_home }}/.config/systemd/user/{{ slock_ai_service_name }}"
-    owner: "{{ gtr_ai_user }}"
-    group: "{{ gtr_ai_user }}"
-    mode: "0644"
-
-- name: Confirm Slock daemon package resolves through npx
+- name: Stop and disable obsolete Slock user service
   ansible.builtin.shell: |
-    cd {{ gtr_ai_home }}
-    runuser -u {{ gtr_ai_user }} -- env HOME={{ gtr_ai_home }} XDG_RUNTIME_DIR=/run/user/{{ gtr_ai_user_uid }} \
-      npx --yes {{ slock_ai_npx_package }} 2>&1 | grep -q 'Usage: slock-daemon'
+    systemctl --user disable --now slock-ai-daemon.service 2>/dev/null || true
+    systemctl --user daemon-reload
   args:
     executable: /bin/bash
+  become: true
+  become_user: "{{ gtr_ai_user }}"
+  environment:
+    HOME: "{{ gtr_ai_home }}"
+    XDG_RUNTIME_DIR: "/run/user/{{ gtr_ai_user_uid }}"
   changed_when: false
 
-- name: Reload AI user systemd manager
-  ansible.builtin.command: >
-    runuser -u {{ gtr_ai_user }} -- env
-    HOME={{ gtr_ai_home }}
-    XDG_RUNTIME_DIR=/run/user/{{ gtr_ai_user_uid }}
-    systemctl --user daemon-reload
-  changed_when: false
+- name: Remove obsolete Slock user service definition
+  ansible.builtin.file:
+    path: "{{ gtr_ai_home }}/.config/systemd/user/slock-ai-daemon.service"
+    state: absent
+  notify: Reload AI user systemd manager
 
-- name: Enable Slock user service
-  ansible.builtin.command: >
-    runuser -u {{ gtr_ai_user }} -- env
-    HOME={{ gtr_ai_home }}
-    XDG_RUNTIME_DIR=/run/user/{{ gtr_ai_user_uid }}
-    systemctl --user enable {{ slock_ai_service_name }}
-  register: slock_ai_enable
-  changed_when: "'Created symlink' in slock_ai_enable.stdout or 'Created symlink' in slock_ai_enable.stderr"
+- name: Remove obsolete Slock daemon configuration
+  ansible.builtin.file:
+    path: "{{ gtr_ai_home }}/.config/slock-ai"
+    state: absent
 
-- name: Restart Slock user service
-  ansible.builtin.command: >
-    runuser -u {{ gtr_ai_user }} -- env
-    HOME={{ gtr_ai_home }}
-    XDG_RUNTIME_DIR=/run/user/{{ gtr_ai_user_uid }}
-    systemctl --user restart {{ slock_ai_service_name }}
+- name: Install Raft Computer from the official installer
+  ansible.builtin.shell: |
+    set -euo pipefail
+    curl -fsSL {{ raft_computer_install_url | quote }} | sh
+  args:
+    executable: /bin/bash
+  become: true
+  become_user: "{{ gtr_ai_user }}"
+  environment:
+    HOME: "{{ gtr_ai_home }}"
+    RAFT_COMPUTER_NO_MODIFY_PATH: "1"
   changed_when: true
 
-- name: Verify Slock user service is active
-  ansible.builtin.command: >
-    runuser -u {{ gtr_ai_user }} -- env
-    HOME={{ gtr_ai_home }}
-    XDG_RUNTIME_DIR=/run/user/{{ gtr_ai_user_uid }}
-    systemctl --user is-active {{ slock_ai_service_name }}
-  register: slock_ai_active
+- name: Verify Raft Computer binary is installed
+  ansible.builtin.command: "{{ raft_computer_binary }} --version"
+  become: true
+  become_user: "{{ gtr_ai_user }}"
+  register: raft_computer_version
   changed_when: false
+
+- name: Connect Raft Computer to the configured project and machine
+  ansible.builtin.command:
+    argv:
+      - "{{ raft_computer_binary }}"
+      - setup
+      - "/{{ raft_computer_project }}"
+      - --machine
+      - "{{ raft_computer_machine }}"
+  become: true
+  become_user: "{{ gtr_ai_user }}"
+  environment:
+    HOME: "{{ gtr_ai_home }}"
+  register: raft_computer_setup
+  changed_when: false
+  no_log: true
 
 - name: Display AI tool deployment summary
   ansible.builtin.debug:
     msg:
       - "Installed CLI versions: {{ gtr_ai_cli_versions.results | map(attribute='stdout') | list }}"
-      - "Slock service: {{ slock_ai_service_name }} is {{ slock_ai_active.stdout }}"
+      - "Raft Computer version: {{ raft_computer_version.stdout }}"
+      - "Raft Computer is connected to /{{ raft_computer_project }} on machine {{ raft_computer_machine }}"
       - "Config source: {{ gtr_ai_controller_home }}"

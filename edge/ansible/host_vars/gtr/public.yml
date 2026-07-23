@@ -15,5 +15,5 @@ k3s_node_labels:
   gtr.io/visibility: internal
 ansible_ssh_common_args: '-o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o ConnectTimeout=30'
 gtr_ai_user: lynskylate
-slock_ai_label: tiequn-misc
-slock_ai_server_url: https://api.slock.ai
+raft_computer_project: tiequn-misc
+raft_computer_machine: 44324695-06ed-46d6-a4bc-3703c5c37a6c

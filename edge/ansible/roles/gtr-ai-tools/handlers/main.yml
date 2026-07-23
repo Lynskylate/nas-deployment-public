@@ -1,0 +1,8 @@
+---
+- name: Reload AI user systemd manager
+  ansible.builtin.command: >
+    runuser -u {{ gtr_ai_user }} -- env
+    HOME={{ gtr_ai_home }}
+    XDG_RUNTIME_DIR=/run/user/{{ gtr_ai_user_uid }}
+    systemctl --user daemon-reload
+  changed_when: false

@@ -169,7 +169,7 @@ jobs:
         working-directory: edge/ansible
         run: ansible-playbook -i inventory-edge.ini deploy-resource-manifest.yml -v
 
-      - name: Deploy AI tools and Slock daemon
+      - name: Deploy AI tools and Raft Computer
         if: needs.preflight.outputs.run_gtr_ai_tools == 'true' && needs.preflight.outputs.run_k3s_agent != 'true'
         working-directory: edge/ansible
         run: ansible-playbook -i inventory-edge.ini deploy-gtr-ai-tools.yml -v

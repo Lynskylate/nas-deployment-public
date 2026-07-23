@@ -110,7 +110,7 @@ roles_path = ./roles
 | `deploy-edge-tunnel-server.yml` | tunnel server | `edge_remote_proxy` |
 | `deploy-gtr-k3s-server.yml` | K3s server | `edge_tencent` |
 | `deploy-gtr-k3s-agent.yml` | K3s agents | `gtr_core:edge_aliyun:edge_remote_proxy` |
-| `deploy-gtr-ai-tools.yml` | AI tools + Slock daemon | `gtr_core` |
+| `deploy-gtr-ai-tools.yml` | AI tools + Raft Computer | `gtr_core` |
 | `deploy-resource-manifest.yml` | resource manifest | `gtr_core` |
 | `deploy-platform-argocd.yml` | ArgoCD bootstrap | `edge_tencent` |
 | `bootstrap-platform-sealed-secrets-key.yml` | Sealed Secrets 私钥恢复（controller 由 Argo CD 管理） | `edge_tencent` |

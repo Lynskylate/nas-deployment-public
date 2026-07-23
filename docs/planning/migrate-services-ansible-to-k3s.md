@@ -95,7 +95,7 @@ K3s Cluster (4 nodes)
 | 10 | **Tailscale Operator 引导** | 同上 | `deploy-platform-tailscale-operator.yml` |
 | 11 | **AI tools** (Claude/Codex/OpenCode) | 用户交互 CLI | `deploy-gtr-ai-tools.yml` |
 | 12 | **Podman + project runtime** | K3s 互补运行时 | `deploy-gtr-project-runtime.yml` |
-| 13 | **Slock daemon** | 用户级 systemd 服务 | (含在 AI tools 中) |
+| 13 | **Raft Computer** | 用户级 Raft 连接客户端（不使用 systemd） | (含在 AI tools 中) |
 
 ---
 

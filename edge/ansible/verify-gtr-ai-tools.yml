@@ -1,5 +1,5 @@
 ---
-- name: Verify AI coding tools and Slock daemon on GTR
+- name: Verify AI coding tools and Raft Computer on GTR
   hosts: gtr_core
   become: true
 
@@ -44,63 +44,31 @@
       loop_control:
         label: "{{ item.item }}"
 
-    - name: Verify Slock user service is enabled
-      ansible.builtin.command: >
-        runuser -u {{ verify_gtr_ai_user }} -- env
-        HOME={{ verify_gtr_ai_home }}
-        XDG_RUNTIME_DIR=/run/user/{{ verify_gtr_ai_uid }}
-        systemctl --user is-enabled slock-ai-daemon.service
-      register: verify_slock_enabled
+    - name: Verify Raft Computer is installed
+      ansible.builtin.command: "{{ verify_gtr_ai_home }}/.local/bin/raft-computer --version"
+      become_user: "{{ verify_gtr_ai_user }}"
+      register: verify_raft_computer_version
       changed_when: false
 
-    - name: Verify Slock user service is active
-      ansible.builtin.command: >
-        runuser -u {{ verify_gtr_ai_user }} -- env
-        HOME={{ verify_gtr_ai_home }}
-        XDG_RUNTIME_DIR=/run/user/{{ verify_gtr_ai_uid }}
-        systemctl --user is-active slock-ai-daemon.service
-      register: verify_slock_active
+    - name: Inspect Raft Computer connection status
+      ansible.builtin.command: "{{ verify_gtr_ai_home }}/.local/bin/raft-computer status"
+      become_user: "{{ verify_gtr_ai_user }}"
+      environment:
+        HOME: "{{ verify_gtr_ai_home }}"
+      register: verify_raft_computer_status
       changed_when: false
+      no_log: true
 
-    - name: Verify Slock API is reachable from GTR
-      ansible.builtin.command:
-        argv:
-          - curl
-          - -I
-          - -sS
-          - --max-time
-          - "15"
-          - https://api.slock.ai
-      register: verify_slock_api
-      changed_when: false
-
-    - name: Assert Slock API responds
+    - name: Assert Raft Computer is connected to the configured machine
       ansible.builtin.assert:
         that:
-          - "'HTTP/' in verify_slock_api.stdout"
-        fail_msg: "Slock API is not reachable from GTR"
-        quiet: true
-
-    - name: Inspect recent Slock daemon journal
-      ansible.builtin.command: >
-        runuser -u {{ verify_gtr_ai_user }} -- env
-        HOME={{ verify_gtr_ai_home }}
-        XDG_RUNTIME_DIR=/run/user/{{ verify_gtr_ai_uid }}
-        journalctl --user-unit=slock-ai-daemon.service -n 20 --no-pager
-      register: verify_slock_journal
-      changed_when: false
-
-    - name: Assert Slock daemon has recent server activity
-      ansible.builtin.assert:
-        that:
-          - "'Received ping' in verify_slock_journal.stdout or 'Connected to server' in verify_slock_journal.stdout"
-        fail_msg: "Slock daemon is active but not exchanging recent heartbeats with the server"
+          - "(raft_computer_machine | default('44324695-06ed-46d6-a4bc-3703c5c37a6c')) in verify_raft_computer_status.stdout"
+        fail_msg: "Raft Computer is not connected to the configured machine"
         quiet: true
 
     - name: Display verification summary
       ansible.builtin.debug:
         msg:
           - "CLI versions: {{ verify_gtr_ai_cli_versions.results | map(attribute='stdout') | list }}"
-          - "Slock enabled: {{ verify_slock_enabled.stdout }}"
-          - "Slock active: {{ verify_slock_active.stdout }}"
-          - "Slock API reachable: {{ 'HTTP/' in verify_slock_api.stdout }}"
+          - "Raft Computer version: {{ verify_raft_computer_version.stdout }}"
+          - "Raft Computer is connected to machine {{ raft_computer_machine | default('44324695-06ed-46d6-a4bc-3703c5c37a6c') }}"

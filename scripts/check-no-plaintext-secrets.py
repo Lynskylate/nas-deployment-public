@@ -28,7 +28,6 @@ PLACEHOLDER_HINTS = (
 )
 ASSIGNMENT_PATTERNS = [
     (re.compile(r"^\s*k3s_cluster_token:\s*['\"]?(.+\S)", re.M), "k3s_cluster_token must stay in the private vault repo."),
-    (re.compile(r"^\s*slock_ai_api_key:\s*['\"]?(.+\S)", re.M), "slock_ai_api_key must stay in the private vault repo."),
     (re.compile(r"^\s*shadowsocks_password:\s*['\"]?(.+\S)", re.M), "shadowsocks_password must stay in the private vault repo."),
     (re.compile(r"^\s*shadowtls_password:\s*['\"]?(.+\S)", re.M), "shadowtls_password must stay in the private vault repo."),
     (re.compile(r"^\s*hysteria2_password:\s*['\"]?(.+\S)", re.M), "hysteria2_password must stay in the private vault repo."),

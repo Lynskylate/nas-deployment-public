@@ -47,7 +47,6 @@ private repo: `Lynskylate/nas-deployment-vault`
 保留在 private vault repo:
 
 - `k3s_cluster_token`
-- `slock_ai_api_key`
 - `shadowsocks_password`
 - `shadowtls_password`
 - `proxy_provider_url`

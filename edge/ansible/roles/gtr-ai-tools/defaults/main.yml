@@ -65,10 +65,7 @@ gtr_ai_config_files:
     dest: "{{ gtr_ai_home }}/.opencode/package-lock.json"
     mode: "0644"
 
-slock_ai_label: tiequn-misc
-slock_ai_service_name: slock-ai-daemon.service
-slock_ai_server_url: "https://api.slock.ai"
-slock_ai_npx_package: "@slock-ai/daemon@0.55.5"
-slock_ai_npx_bin: slock-daemon
-slock_ai_config_dir: "{{ gtr_ai_home }}/.config/slock-ai"
-slock_ai_env_file: "{{ slock_ai_config_dir }}/daemon.env"
+raft_computer_install_url: "https://cdn.raft.build/computer/install.sh"
+raft_computer_binary: "{{ gtr_ai_home }}/.local/bin/raft-computer"
+raft_computer_project: tiequn-misc
+raft_computer_machine: 44324695-06ed-46d6-a4bc-3703c5c37a6c

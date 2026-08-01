@@ -81,6 +81,17 @@ proxy-providers:
       interval: 60
     filter: ''
 
+  subscription-backup:
+    type: http
+    url: {{ proxy_provider_backup_url }}
+    path: ./providers/subscription-backup.yaml
+    interval: 3600
+    health-check:
+      enable: true
+      url: https://cp.cloudflare.com/generate_204
+      interval: 60
+    filter: ''
+
   ai-nodes:
     type: http
     url: {{ proxy_provider_url }}
@@ -89,6 +100,17 @@ proxy-providers:
     health-check:
       enable: true
       url: https://cp.cloudflare.com/generate_204
+      interval: 30
+    filter: '美国|US|United States|英国|UK|Britain|德国|DE|Germany'
+
+  ai-nodes-backup:
+    type: http
+    url: {{ proxy_provider_backup_url }}
+    path: ./providers/ai-nodes-backup.yaml
+    interval: 3600
+    health-check:
+      enable: true
+      url: https://www.google.com/generate_204
       interval: 30
     filter: '美国|US|United States|英国|UK|Britain|德国|DE|Germany'
 
@@ -138,6 +160,7 @@ proxy-groups:
     dialer-proxy: "Hysteria2-Salamander"
     use:
       - subscription
+      - subscription-backup
     url: https://cp.cloudflare.com/generate_204
     interval: 60
     tolerance: 100
@@ -148,6 +171,7 @@ proxy-groups:
     dialer-proxy: "Hysteria2-Remote"
     use:
       - subscription
+      - subscription-backup
     url: https://cp.cloudflare.com/generate_204
     interval: 60
     tolerance: 100
@@ -160,6 +184,7 @@ proxy-groups:
     type: select
     use:
       - subscription
+      - subscription-backup
     proxies:
       - General
       - Auto-via-Hy2Sal
@@ -181,6 +206,7 @@ proxy-groups:
     type: url-test
     use:
       - subscription
+      - subscription-backup
     url: https://cp.cloudflare.com/generate_204
     interval: 60
     tolerance: 50
@@ -197,6 +223,7 @@ proxy-groups:
     type: fallback
     use:
       - subscription
+      - subscription-backup
     proxies:
       - Hysteria2-Remote
       - Hysteria2-Salamander
@@ -208,6 +235,7 @@ proxy-groups:
     type: fallback
     use:
       - subscription
+      - subscription-backup
     proxies:
       - Hysteria2-Remote
       - Hysteria2-Salamander
@@ -221,6 +249,7 @@ proxy-groups:
     type: fallback
     use:
       - ai-nodes
+      - ai-nodes-backup
     proxies:
       - Hysteria2-Remote
       - Hysteria2-Salamander
@@ -233,6 +262,7 @@ proxy-groups:
     type: fallback
     use:
       - ai-nodes
+      - ai-nodes-backup
     proxies:
       - Hysteria2-Remote
       - Hysteria2-Salamander
@@ -244,6 +274,7 @@ proxy-groups:
     type: fallback
     use:
       - subscription
+      - subscription-backup
     proxies:
       - Hysteria2-Remote
       - Hysteria2-Salamander
@@ -255,6 +286,7 @@ proxy-groups:
     type: fallback
     use:
       - subscription
+      - subscription-backup
     proxies:
       - Hysteria2-Remote
       - Hysteria2-Salamander

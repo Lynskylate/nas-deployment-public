@@ -2,6 +2,7 @@
 - name: Deploy K3s agents on GTR, aliyun, remote_proxy
   hosts: gtr_core:edge_aliyun:edge_remote_proxy
   become: true
+  gather_facts: false
 
   roles:
     - role: edge-tailscale

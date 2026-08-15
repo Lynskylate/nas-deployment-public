@@ -2,6 +2,7 @@
 - name: Deploy K3s server on tencent
   hosts: edge_tencent
   become: true
+  gather_facts: false
 
   roles:
     - role: edge-tailscale

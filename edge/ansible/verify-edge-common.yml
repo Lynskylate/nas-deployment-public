@@ -3,6 +3,7 @@
 - name: Verify edge baseline
   hosts: edge_hosts
   become: true
+  gather_facts: false
 
   tasks:
     - name: Verify required services are active

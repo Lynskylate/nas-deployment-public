@@ -1,0 +1,74 @@
+---
+# GTR journald log hygiene (2026-11-24)
+# Background: mihomo + mihomo-logs-collector wrote ~40k lines/hour to journald,
+# squeezing the evidence-retention window to ~50h (CFM daily checks depend on it).
+# Both now write to local files with rotation; the VictoriaLogs push target of the
+# collector is broken since the k8s migration (127.0.0.1:8429 is now vmagent) --
+# TODO(owner): repoint VICTORIALOGS_URL at the in-cluster VictoriaLogs service.
+# Legacy pre-migration host units (victoriametrics/victorialogs) are disabled:
+# the real instances run in k8s; the host units crash-looped every 5s.
+
+- name: Ensure log directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - /var/log
+    - /etc/systemd/system/mihomo.service.d
+    - /etc/systemd/system/mihomo-logs-collector.service.d
+
+- name: Mihomo service logs to file (keep journald clean, keep triage capability)
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/mihomo.service.d/override.conf
+    content: |
+      # managed by ansible (log-hygiene role). mihomo info-level logs
+      # (~330 lines/min) squeezed the journald evidence window.
+      [Service]
+      StandardOutput=append:/var/log/mihomo.log
+      StandardError=append:/var/log/mihomo.log
+      LogRateLimitIntervalSec=0
+    mode: "0644"
+  notify: restart mihomo
+
+- name: Collector logs to file (its VictoriaLogs push is broken; stdout was its only working sink)
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/mihomo-logs-collector.service.d/override.conf
+    content: |
+      # managed by ansible (log-hygiene role). ~55k lines/hour; VictoriaLogs
+      # push target (127.0.0.1:8429) dead since k8s migration.
+      [Service]
+      StandardOutput=append:/var/log/mihomo-logs-collector.log
+      StandardError=append:/var/log/mihomo-logs-collector.log
+      LogRateLimitIntervalSec=0
+    mode: "0644"
+  notify: restart mihomo-logs-collector
+
+- name: Logrotate config for proxy log files
+  ansible.builtin.copy:
+    dest: /etc/logrotate.d/mihomo
+    content: |
+      /var/log/mihomo.log /var/log/mihomo-logs-collector.log {
+          daily
+          rotate 7
+          compress
+          delaycompress
+          missingok
+          notifempty
+          copytruncate
+      }
+    mode: "0644"
+
+- name: Disable legacy pre-migration victoria host units (real ones run in k8s)
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+  loop:
+    - victoriametrics.service
+    - victorialogs.service
+  ignore_errors: true
+
+- name: Daemon reload after drop-in changes
+  ansible.builtin.systemd:
+    daemon_reload: true

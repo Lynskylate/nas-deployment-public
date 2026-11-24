@@ -19,6 +19,7 @@
 
   roles:
     - role: mihomo
+    - role: log-hygiene
 
   post_tasks:
     - name: Verify mihomo service is running

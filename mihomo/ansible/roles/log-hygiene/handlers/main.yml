@@ -1,0 +1,10 @@
+---
+- name: restart mihomo
+  ansible.builtin.systemd:
+    name: mihomo
+    state: restarted
+
+- name: restart mihomo-logs-collector
+  ansible.builtin.systemd:
+    name: mihomo-logs-collector
+    state: restarted
